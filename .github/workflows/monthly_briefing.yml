@@ -1,0 +1,134 @@
+name: Monthly Briefing Agent
+
+# ── Triggers ─────────────────────────────────────────────────
+on:
+  # Automatic: 1st of every month at 08:00 SGT (= 00:00 UTC)
+  schedule:
+    - cron: '0 0 1 * *'
+
+  # Manual: click "Run workflow" in GitHub → Actions tab
+  # You can override month and tracks without touching code
+  workflow_dispatch:
+    inputs:
+      month:
+        description: 'Target month (YYYY-MM). Leave blank for current month.'
+        required: false
+        default: ''
+      tracks:
+        description: 'Tracks to run (comma-separated: A,B,C). Leave blank for all.'
+        required: false
+        default: 'A,B,C'
+      dry_run:
+        description: 'Dry run only? (true = save to artifacts, false = send emails)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+
+# ── Job ───────────────────────────────────────────────────────
+jobs:
+  run-briefing:
+    name: Generate & Deliver Briefings
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      # ── 1. Check out repository ──────────────────────────────
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ── 2. Set up Python 3.12 ────────────────────────────────
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      # ── 3. Install system libraries (for weasyprint) ─────────
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libpango-1.0-0 \
+            libpangocairo-1.0-0 \
+            libcairo2 \
+            libgdk-pixbuf2.0-0 \
+            libffi-dev \
+            shared-mime-info
+
+      # ── 4. Install Python dependencies ───────────────────────
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      # ── 5. Install Playwright browsers (for Crawl4AI) ────────
+      - name: Install Playwright browsers
+        run: python -m playwright install chromium --with-deps
+
+      # ── 6. Build CLI arguments ────────────────────────────────
+      - name: Build run arguments
+        id: args
+        run: |
+          # Determine month
+          if [ -n "${{ github.event.inputs.month }}" ]; then
+            MONTH="${{ github.event.inputs.month }}"
+          else
+            MONTH=$(date +%Y-%m)
+          fi
+          echo "month=$MONTH" >> $GITHUB_OUTPUT
+
+          # Determine tracks
+          TRACKS_INPUT="${{ github.event.inputs.tracks || 'A,B,C' }}"
+          TRACK_ARGS=""
+          IFS=',' read -ra TRACK_LIST <<< "$TRACKS_INPUT"
+          for t in "${TRACK_LIST[@]}"; do
+            t=$(echo "$t" | xargs)   # trim whitespace
+            TRACK_ARGS="$TRACK_ARGS --track $t"
+          done
+          echo "track_args=$TRACK_ARGS" >> $GITHUB_OUTPUT
+
+          # Determine send/dry-run
+          DRY="${{ github.event.inputs.dry_run || 'false' }}"
+          if [ "$DRY" = "true" ]; then
+            echo "send_arg=--dry-run" >> $GITHUB_OUTPUT
+          else
+            echo "send_arg=--send" >> $GITHUB_OUTPUT
+          fi
+
+      # ── 7. Run the briefing agent ─────────────────────────────
+      - name: Run briefing agent
+        env:
+          ANTHROPIC_API_KEY:    ${{ secrets.ANTHROPIC_API_KEY }}
+          AZURE_TENANT_ID:      ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID:      ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET:  ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_USER_EMAIL:     ${{ secrets.AZURE_USER_EMAIL }}
+          TAVILY_API_KEY:       ${{ secrets.TAVILY_API_KEY }}
+          SPIDER_API_KEY:       ${{ secrets.SPIDER_API_KEY }}
+        run: |
+          python -m src.orchestrator \
+            --month ${{ steps.args.outputs.month }} \
+            ${{ steps.args.outputs.track_args }} \
+            ${{ steps.args.outputs.send_arg }}
+
+      # ── 8. Upload briefings as downloadable artifacts ─────────
+      # Even if email was sent, the HTML files are available here for 30 days
+      - name: Upload briefing HTML files
+        if: always()   # run even if agent step fails (partial output still useful)
+        uses: actions/upload-artifact@v4
+        with:
+          name: briefings-${{ steps.args.outputs.month }}
+          path: runs/*/delivery/*.html
+          retention-days: 30
+          if-no-files-found: warn
+
+      # ── 9. Upload run log ─────────────────────────────────────
+      - name: Upload run log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-log-${{ steps.args.outputs.month }}
+          path: runs/*/run.log
+          retention-days: 14
+          if-no-files-found: warn

@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(file /c/Users/chuan/betterwiser_briefs_agent/*.pdf)",
+      "Bash(dir \"C:\\\\Users\\\\chuan\\\\betterwiser_briefs_agent\")",
+      "Bash(pip show:*)"
+    ]
+  }
+}

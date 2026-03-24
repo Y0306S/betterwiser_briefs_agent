@@ -1,0 +1,23 @@
+# Web dashboard
+flask>=3.0.0
+
+anthropic>=1.0.0
+azure-identity>=1.15.0
+msgraph-sdk>=1.2.0
+pydantic>=2.6.0
+spider-client>=0.1.0
+tavily-python>=0.5.0
+crawl4ai>=0.8.0
+pymupdf>=1.24.0
+python-docx>=1.1.0
+openpyxl>=3.1.0
+pandas>=2.2.0
+beautifulsoup4>=4.12.0
+html2text>=2024.0.0
+thefuzz>=0.18.0
+python-Levenshtein>=0.25.0
+httpx>=0.27.0
+pyyaml>=6.0.0
+python-dotenv>=1.0.0
+weasyprint>=62.0
+click>=8.1.0

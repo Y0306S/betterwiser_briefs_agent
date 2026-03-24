@@ -1,0 +1,39 @@
+# Environment and secrets — NEVER commit
+.env
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Run outputs (may contain sensitive briefing content)
+runs/*/
+!runs/.gitkeep
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# GitHub Actions — DO NOT ignore (needed for cloud scheduling)
+# .github/ is intentionally tracked
+
+# OS
+.DS_Store
+Thumbs.db

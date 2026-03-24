@@ -1,0 +1,131 @@
+# Vendor and thought leader watchlists
+# These drive Track A vendor monitoring and Track C person-specific deep research.
+# Add new vendors/people as they are discovered.
+
+# Core legal AI vendors (Track A primary coverage)
+vendors:
+  primary:
+    - name: "Harvey"
+      url: "https://harvey.ai"
+      blog_url: "https://harvey.ai/blog"
+    - name: "Legora"
+      url: "https://legora.com"
+      blog_url: "https://legora.com/blog"
+    - name: "vLex"
+      url: "https://vlex.com"
+      blog_url: "https://vlex.com/blog"
+    - name: "Luminance"
+      url: "https://luminance.com"
+      blog_url: "https://luminance.com/news"
+    - name: "SpotDraft"
+      url: "https://spotdraft.com"
+      blog_url: "https://spotdraft.com/blog"
+    - name: "Spellbook"
+      url: "https://spellbook.legal"
+      blog_url: "https://spellbook.legal/blog"
+    - name: "Clio"
+      url: "https://clio.com"
+      blog_url: "https://clio.com/blog"
+    - name: "Jigsaw"
+      url: "https://jigsaw.xyz"
+      blog_url: "https://jigsaw.xyz/blog"
+    - name: "Anthropic (Claude legal)"
+      url: "https://anthropic.com"
+      blog_url: "https://anthropic.com/news"
+
+  asia_focused:
+    - name: "Tessaract"
+      url: "https://tessaract.io"
+      blog_url: null
+    - name: "Zegal"
+      url: "https://zegal.com"
+      blog_url: "https://zegal.com/blog"
+    - name: "Lupl"
+      url: "https://lupl.com"
+      blog_url: null
+
+  emerging:
+    # Vendors added automatically when they appear in 3+ sources
+    # Format: - name: "VendorName"
+    []
+
+# Thought leaders for Track C person-specific deep search (Wave 2)
+# Each person gets 4+ targeted searches per run
+thought_leaders:
+  - name: "Jamie Tso"
+    affiliation: "Legal Quants"
+    search_terms:
+      - '"Jamie Tso" legal AI'
+      - '"Jamie Tso" site:medium.com OR site:substack.com'
+      - '"Jamie Tso" legalquants'
+      - '"Jamie Tso" conference OR keynote OR panel'
+
+  - name: "Anna Lozynski"
+    affiliation: "Legal innovation consultant"
+    search_terms:
+      - '"Anna Lozynski" legal AI'
+      - '"Anna Lozynski" innovation'
+      - '"Anna Lozynski" site:linkedin.com OR site:substack.com'
+      - '"Anna Lozynski" keynote OR panel'
+
+  - name: "Patrick Tan"
+    affiliation: "Legal AI Singapore"
+    search_terms:
+      - '"Patrick Tan" legal AI Singapore'
+      - '"Patrick Tan" legal technology'
+      - '"Patrick Tan" Singapore lawyer AI'
+      - '"Patrick Tan" innovation legal'
+
+  - name: "Damien Riehl"
+    affiliation: "Legal AI researcher"
+    search_terms:
+      - '"Damien Riehl" legal AI'
+      - '"Damien Riehl" generative AI law'
+      - '"Damien Riehl" site:medium.com OR site:substack.com'
+      - '"Damien Riehl" conference OR talk'
+
+  - name: "Bob Ambrogi"
+    affiliation: "LawNext / LawSites"
+    search_terms:
+      - '"Bob Ambrogi" legal AI'
+      - '"Bob Ambrogi" lawnext'
+      - '"Bob Ambrogi" site:lawnext.com'
+      - '"Bob Ambrogi" podcast OR interview'
+
+# Consulting firms for Track C Wave 3 (firm thought leadership pages)
+consulting_firms:
+  - name: "PwC"
+    insights_url: "https://www.pwc.com/gx/en/issues/artificial-intelligence.html"
+    sg_insights_url: "https://www.pwc.com/sg/en/insights.html"
+
+  - name: "McKinsey Global Institute"
+    insights_url: "https://www.mckinsey.com/capabilities/mckinsey-digital/our-insights"
+
+  - name: "EY"
+    insights_url: "https://www.ey.com/en_gl/insights/ai"
+    sg_insights_url: "https://www.ey.com/en_sg/insights"
+
+  - name: "Deloitte"
+    insights_url: "https://www2.deloitte.com/global/en/pages/technology/topics/artificial-intelligence.html"
+
+  - name: "KPMG"
+    insights_url: "https://kpmg.com/xx/en/home/insights/2023/04/artificial-intelligence.html"
+
+  - name: "BCG"
+    insights_url: "https://www.bcg.com/capabilities/digital-technology-data/artificial-intelligence/insights"
+
+  - name: "Artificial Lawyer"
+    insights_url: "https://www.artificiallawyer.com"
+
+# Conference sources for Track C Wave 6 (speaker mining)
+conferences:
+  - name: "Legal Innovation Festival Southeast Asia"
+    website_search: "Legal Innovation Festival Southeast Asia 2026 speakers agenda"
+  - name: "ACC Asia-Pacific Annual Conference"
+    website_search: "ACC Asia Pacific Annual Conference 2026 speakers"
+  - name: "ILTACON"
+    website_search: "ILTACON 2026 speakers agenda legal technology"
+  - name: "ALITA Summit"
+    website_search: "ALITA Asia Pacific Legal Innovation Summit 2026"
+  - name: "Legal Geek"
+    website_search: "Legal Geek conference 2026 speakers"

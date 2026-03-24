@@ -1,0 +1,47 @@
+BetterWiser Company Context — For AI Briefing Agent (Track C: Thought Leadership Relevance Commentary)
+
+ABOUT BETTERWISER
+
+BetterWiser is a Singapore-based boutique consulting practice founded by Lynette Ooi, a former Amazon and PayPal executive with 18 years of experience as a tech lawyer and international Head of Legal across Asia, the Middle East, and Africa. The firm operates at the intersection of legal innovation, executive coaching, and change management.
+
+CORE SERVICES
+
+1. Legal Innovation Consulting: BetterWiser advises law firms, in-house legal teams, and legaltech vendors on AI-driven legal operations transformation and related culture reinvention. This includes translating regulatory developments into practical governance frameworks, refining AI-enabled workflows, supporting training programmes, and guiding teams as they move AI use cases from pilot to production.
+
+2. Executive Coaching & Leadership Development: Confidential, high-trust coaching for founders and senior leaders navigating career transitions, reinvention, and decision-making in complex environments. Focus areas include purpose and personal fulfilment, personal branding and executive presence, and leadership in the AI era.
+
+3. Advisory & Speaking: Workshops, offsites, and facilitation for leadership teams and professional communities on topics including navigating change in the AI era, values-driven leadership, effective communication, and career pathways in a nonlinear world.
+
+4. Startup Consulting: Supporting high-growth startups and scale-ups on strategic and operational challenges including cross-border expansion, commercial negotiations, and building foundational processes.
+
+TARGET CLIENTS
+
+BetterWiser serves three primary client segments:
+- Law firms (from Singapore domestic firms to large international firms operating in Asia-Pacific) seeking to adopt legal AI tools, redesign workflows, and upskill their teams.
+- In-house legal departments at corporations (particularly in tech, financial services, and MNCs) looking to integrate AI into contract governance, compliance, and legal operations.
+- Legaltech vendors seeking to understand the practitioner perspective, refine their go-to-market in Asia-Pacific, and navigate the regulatory landscape.
+
+COMPETITIVE POSITIONING
+
+BetterWiser occupies a unique position in the Singapore legal innovation ecosystem:
+- Practitioner credibility: Lynette's decade-plus at Amazon and PayPal, managing legal teams across 100+ markets with over USD 1B in revenue, gives BetterWiser deep operational credibility that pure consultancies lack.
+- Regulatory influence: BetterWiser is a listed contributor to Singapore's Ministry of Law Guide for Using Generative AI in the Legal Sector (published March 2026). The firm submitted detailed feedback during the public consultation, with several recommendations reflected in the final guide.
+- Thought leadership platform: Lynette publishes the "Innovate Legal" Substack newsletter, a forum for senior legal leaders navigating AI, governance, and operating model transformation across Asia-Pacific. She is followed by 10,000+ professionals on LinkedIn.
+- Ecosystem connectivity: BetterWiser is actively connected to the Singapore legal innovation community including SAL, the Ministry of Law's Legal Technology Transformation Office, ALITA (Asia-Pacific Legal Innovation & Technology Association), and key events like the Legal Innovation Festival Southeast Asia.
+
+STRATEGIC PRIORITIES FOR 2026
+
+- Helping legal teams move from AI pilot programmes to operational, scaled deployment with measurable ROI.
+- Supporting organisations in building AI governance frameworks that satisfy both regulatory expectations (particularly Singapore's MinLaw Guide) and practical workflow needs.
+- Championing the "change management" dimension of legal AI adoption — the human, cultural, and organisational factors that determine whether AI tools deliver real value.
+- Expanding influence as a trusted, vendor-neutral voice in the Asia-Pacific legal AI ecosystem, bridging the gap between technology vendors, regulators, and legal practitioners.
+- Building a community of legally trained AI-fluent professionals who can evaluate tools critically, adopt responsibly, and drive transformation from within their organisations.
+
+RELEVANCE LENS FOR THOUGHT LEADERSHIP COMMENTARY
+
+When evaluating thought leadership content for "Relevance to BetterWiser," the agent should consider:
+- Does this development affect how law firms or in-house teams in APAC adopt, govern, or scale legal AI?
+- Does it relate to change management, workforce transformation, or the human dimensions of AI adoption?
+- Does it impact the vendor landscape that BetterWiser's clients are evaluating?
+- Does it connect to Singapore's regulatory and policy environment for legal AI?
+- Does it reinforce or challenge BetterWiser's advisory positions on responsible AI adoption, governance-first approaches, or practitioner-led innovation?

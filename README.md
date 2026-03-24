@@ -1,0 +1,359 @@
+# BetterWiser Legal-Tech AI Briefing Agent
+
+> **Fully autonomous monthly intelligence briefings for the legal AI ecosystem.**
+> Replaces manual research with a Claude-powered pipeline that gathers, synthesises, validates, and delivers three separate briefings every month — automatically.
+
+---
+
+## What It Does
+
+Every month, this agent scans the legal AI landscape and delivers three polished intelligence briefings to your team via email:
+
+| Track | Name | Contents |
+|-------|------|----------|
+| **A** | Vendor & Customer Intelligence | Harvey, Luminance, vLex, Singapore law firm AI adoption — 10–15 dated bullet items |
+| **B** | Global AI Policy & Regulatory Watch | EU AI Act, Singapore MinLaw, UK ICO, US NIST — 6–8 thematic summaries |
+| **C** | Thought Leadership Digest | Deep research on named thought leaders, firm perspectives, BetterWiser relevance commentary |
+
+---
+
+## Three Ways to Run It
+
+### Option 1 — Web Dashboard (Recommended for team use)
+A browser-based UI. No command line needed. Anyone on the team can trigger a run, watch live progress, and open the finished briefings.
+
+```
+python dashboard.py
+→ Open http://localhost:5000
+```
+
+### Option 2 — GitHub Actions (Fully automatic, zero interaction)
+Runs on the 1st of every month in the cloud. Briefings are emailed automatically and also available as downloadable artifacts in GitHub. No machine needs to be on.
+
+See [.github/workflows/monthly_briefing.yml](.github/workflows/monthly_briefing.yml) — set it up once, forget about it.
+
+### Option 3 — Command Line (For developers)
+```bash
+python -m src.orchestrator --month 2026-03 --send
+```
+
+---
+
+## System Architecture
+
+### High-Level Pipeline
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    BETTERWISER BRIEFING AGENT                       │
+│                                                                     │
+│  ┌──────────┐    ┌──────────┐    ┌────────────┐    ┌──────────┐   │
+│  │ PHASE 1  │───▶│ PHASE 2  │───▶│  PHASE 3   │───▶│ PHASE 4  │   │
+│  │ TRIGGER  │    │  GATHER  │    │ SYNTHESISE │    │ VALIDATE │   │
+│  └──────────┘    └──────────┘    └────────────┘    └──────────┘   │
+│  Build context   5 sub-pipelines  6-pass pipeline   Grounding       │
+│  Load config     run in parallel  per track         + links         │
+│                                                          │          │
+│                                                    ┌──────────┐    │
+│                                                    │ PHASE 5  │    │
+│                                                    │ DELIVER  │    │
+│                                                    └──────────┘    │
+│                                                    Save HTML +     │
+│                                                    Send via email   │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Phase 2: Intelligence Gathering (5 Sub-Pipelines in Parallel)
+
+```
+                          ┌─────────────────────┐
+                          │   GATHER PHASE       │
+                          │  (all run at once)   │
+                          └─────────┬───────────┘
+              ┌──────────┬──────────┼──────────┬──────────┐
+              │          │          │          │          │
+              ▼          ▼          ▼          ▼          ▼
+        ┌──────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐
+        │  INBOX   │ │  WEB   │ │CLAUDE  │ │THOUGHT │ │HISTORY │
+        │ READER   │ │SCRAPER │ │DISCOV. │ │LEADER. │ │LOADER  │
+        │          │ │        │ │        │ │WAVES   │ │        │
+        │ MS Graph │ │Jina →  │ │web_    │ │(Track C│ │Previous│
+        │ Azure AD │ │Spider→ │ │search  │ │ only)  │ │month   │
+        │ Optional │ │Crawl4AI│ │queries │ │6 waves │ │context │
+        └──────────┘ └────────┘ └────────┘ └────────┘ └────────┘
+              │          │          │          │          │
+              └──────────┴──────────┴──────────┴──────────┘
+                                    │
+                              GatheredData
+                           (Pydantic v2 model)
+```
+
+> **Graceful degradation**: If inbox credentials are missing → web-only.
+> If Spider API key missing → falls back to Jina (free). Each sub-pipeline
+> failure is logged and the pipeline continues regardless.
+
+### Phase 3: Six-Pass Synthesis (per Track)
+
+```
+  GatheredData
+       │
+       ▼
+  ┌─────────────────────────────────────────────────────────┐
+  │                    SYNTHESIS PIPELINE                    │
+  │                                                         │
+  │  Pass 0  ──▶  Pass 1  ──▶  Pass 2  ──▶  Pass 3         │
+  │  Cluster      Triage       DRAFT         Fact-check     │
+  │  & Dedup      & Sort       (Claude       (Citations     │
+  │  (thefuzz     (authority   Opus 4.6      API re-        │
+  │   match)      tiers)       extended      verifies       │
+  │                            thinking)     claims)        │
+  │                                │                        │
+  │                         Pass 3.5  ──▶  Pass 4          │
+  │                         Grounding      Format HTML      │
+  │                         Verify         (Outlook-safe    │
+  │                         (fuzzy ≥ 0.95) table layout,    │
+  │                                        link validate)   │
+  └─────────────────────────────────────────────────────────┘
+       │
+       ▼
+  ValidatedBriefing
+```
+
+### Phase 5: Delivery Decision Tree
+
+```
+  ValidatedBriefing
+         │
+         ▼
+  ┌─────────────────┐
+  │ held_for_review?│──YES──▶ Save to disk only (grounding failed)
+  └────────┬────────┘
+           │ NO
+           ▼
+  ┌─────────────────┐
+  │  --send flag?   │──NO───▶ Save HTML to runs/ (dry-run)
+  └────────┬────────┘
+           │ YES
+           ▼
+  ┌─────────────────┐
+  │ Azure creds?    │──NO───▶ Save to disk + warn
+  └────────┬────────┘
+           │ YES
+           ▼
+     Send via MS Graph API
+     (Microsoft 365 email)
+```
+
+---
+
+## AI Models & External Services
+
+### Claude Opus 4.6 — Used In Three Ways
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    CLAUDE OPUS 4.6                          │
+│                                                             │
+│  1. DISCOVERY          2. THOUGHT LEADERSHIP   3. SYNTHESIS │
+│  ─────────────         ─────────────────────   ──────────── │
+│  web_search tool       web_search (6 waves)    Extended     │
+│  Finds news &          web_fetch tool          Thinking     │
+│  announcements         Deep per-person         + Citations  │
+│  for all 3 tracks      research (Track C)      API          │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### External Services
+
+```
+┌────────────────────────────────────────────────────────────────────┐
+│                       YOUR MACHINE / GITHUB                        │
+│                                                                    │
+│   src/orchestrator.py  (or GitHub Actions runner)                 │
+│          │                                                         │
+│    ┌─────┼──────────────────────────────┐                         │
+│    │     │                              │                         │
+│    ▼     ▼                              ▼                         │
+│  ┌─────────────┐  ┌──────────────┐  ┌──────────┐                 │
+│  │  Anthropic  │  │   Jina       │  │  Azure   │                 │
+│  │     API     │  │  Reader      │  │    AD    │                 │
+│  │  REQUIRED   │  │   FREE       │  │ OPTIONAL │                 │
+│  │ Claude Opus │  │ r.jina.ai    │  └────┬─────┘                 │
+│  │ 4.6 model   │  └──────┬───────┘       │                       │
+│  └─────────────┘         │               ▼                       │
+│                           │    ┌──────────────────┐              │
+│                    ┌──────┘    │  Microsoft Graph  │              │
+│                    │           │  Email Read/Send  │              │
+│                    ▼           └──────────────────┘              │
+│             ┌─────────────┐                                       │
+│             │   Spider    │  OPTIONAL — fallback after Jina       │
+│             │     API     │                                       │
+│             └──────┬──────┘                                       │
+│                    │                                              │
+│                    ▼                                              │
+│             ┌─────────────┐                                       │
+│             │   Tavily    │  OPTIONAL — Track C deep research     │
+│             └─────────────┘                                       │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Web Dashboard
+
+The dashboard provides a browser-based interface for non-technical users.
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  BetterWiser · Briefing Agent                                │
+├──────────────────────────────────────────────────────────────┤
+│  ⚡ Generate New Briefing                                     │
+│                                                              │
+│  Month: [2026-03]    Tracks: [✓A] [✓B] [✓C]                │
+│  Mode:  [💾 Save to Disk] [📧 Send via Email]               │
+│                                                              │
+│  [ ▶ Generate Briefing ]                                     │
+├──────────────────────────────────────────────────────────────┤
+│  📋 Run History                                              │
+│                                                              │
+│  2026-03  ✓ Done    [A] [B] [C⚠]  View logs                 │
+│  2026-02  ✓ Done    [A] [B] [C]   View logs                 │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**Start the dashboard:**
+```bash
+conda activate bw-briefing
+python dashboard.py
+# Open http://localhost:5000
+```
+
+Features:
+- Live log streaming while a run is in progress
+- One-click briefing viewer (opens HTML in browser tab)
+- Visual status: saved / sent / ⚠ held for review
+- No command line knowledge needed
+
+---
+
+## GitHub Actions (Fully Automatic)
+
+The workflow at [.github/workflows/monthly_briefing.yml](.github/workflows/monthly_briefing.yml) runs on the 1st of every month at 08:00 SGT (00:00 UTC).
+
+**What happens automatically each month:**
+1. GitHub spins up a cloud machine
+2. Installs all dependencies
+3. Runs the full pipeline and sends emails
+4. Uploads the HTML briefings as downloadable artifacts
+5. Machine shuts down — you pay nothing
+
+**To trigger manually** (e.g. test a specific month):
+- Go to your repo on GitHub
+- Click **Actions** → **Monthly Briefing Agent** → **Run workflow**
+- Enter a month (e.g. `2026-03`) and click the green button
+
+**Setup required:** Add all API keys as GitHub Secrets (repo Settings → Secrets and variables → Actions). See [SETUP_CHECKLIST.md](SETUP_CHECKLIST.md) Part 8.
+
+---
+
+## Track Descriptions
+
+### Track A — Vendor & Customer Intelligence
+10–15 dated bullet items across three segments:
+1. Primary legal AI vendors (Harvey, Luminance, vLex, Legora, Anthropic)
+2. Singapore law firms adopting AI
+3. Singapore government / SAL initiatives
+
+### Track B — Global AI Policy & Regulatory Watch
+6–8 thematic summaries covering:
+- Singapore: MinLaw, PDPC, MAS, AGC
+- EU: AI Office, EU AI Act enforcement
+- UK: ICO, DSIT
+- US: NIST, FTC, White House OSTP
+
+### Track C — Thought Leadership Digest
+6-wave deep research process:
+```
+Wave 1  Extract thought leaders from newsletters
+Wave 2  Per-person deep search (4+ queries each)
+Wave 3  Retrieve firm insights pages (PwC, McKinsey, EY, Deloitte…)
+Wave 4  Tavily advanced research for strategic themes
+Wave 5  Semantic similarity expansion
+Wave 6  Conference speaker mining → extend watchlist
+```
+Each article gets: Summary · Opinion Takeaway · BetterWiser Relevance
+
+---
+
+## File Structure
+
+```
+betterwiser_briefs_agent/
+│
+├── dashboard.py                   ← Web dashboard (python dashboard.py)
+├── templates/                     ← Dashboard HTML templates
+│   ├── dashboard.html
+│   └── run_detail.html
+│
+├── .github/workflows/
+│   └── monthly_briefing.yml       ← GitHub Actions auto-scheduler
+│
+├── config/                        ← Edit these to customise behaviour
+│   ├── briefing_config.yaml       ← Recipients, model, thresholds, queries
+│   ├── betterwiser_context.txt    ← Company context for Track C
+│   ├── newsletter_subscriptions.yaml
+│   ├── vendor_watchlist.yaml
+│   └── prompt_templates/
+│
+├── src/
+│   ├── orchestrator.py            ← CLI entry point
+│   ├── schemas.py                 ← All Pydantic v2 data models
+│   ├── gatherers/                 ← Phase 2: 5 data sub-pipelines
+│   ├── synthesis/                 ← Phase 3: 6-pass synthesis
+│   ├── delivery/                  ← Phase 5: archive + email
+│   └── utils/                     ← Shared helpers
+│
+├── runs/                          ← Output (auto-created)
+│   └── 2026-03_run_20260301T080000/
+│       ├── run.log
+│       └── delivery/
+│           ├── track_A.html       ← Your briefing
+│           ├── track_B.html
+│           └── track_C.html
+│
+├── .env                           ← API keys (never commit)
+├── .env.example                   ← Copy this to create .env
+├── requirements.txt
+├── SETUP_CHECKLIST.md             ← Start here for setup
+└── SETUP.md                       ← Azure AD detail guide
+```
+
+---
+
+## Quality Safeguards
+
+```
+Layer 1: CITATIONS         Every claim must be traceable to a
+─────────────────          scraped source (Anthropic Citations API)
+
+Layer 2: GROUNDING         95%+ of claims must fuzzy-match source
+──────────────────         text (configurable in briefing_config.yaml)
+
+Layer 3: HELD FOR REVIEW   Below 95% → saved to disk, NOT emailed,
+────────────────────────   flagged ⚠ in the dashboard for human review
+```
+
+---
+
+## Cost
+
+| Component | Per Monthly Run |
+|-----------|----------------|
+| Claude Opus 4.6 (synthesis) | ~$15–20 |
+| Claude web searches (150–250) | ~$1.50–2.50 |
+| Tavily deep research | ~$0.50–1.00 |
+| Jina Reader | Free |
+| Spider API | ~$0.02 |
+| Microsoft Graph | Free |
+| GitHub Actions | Free (private repo) |
+| **Total** | **~$17–24 / month** |

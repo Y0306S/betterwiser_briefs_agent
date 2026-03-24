@@ -1,0 +1,100 @@
+# Newsletter subscriptions configured on the agent's inbox (ai-briefing@betterwiser.com)
+# Add entries here as new subscriptions are set up.
+# sender_patterns: partial match against sender email/domain
+# subject_patterns: partial match against email subject line
+
+subscriptions:
+  - name: "Artificial Lawyer"
+    sender_patterns: ["artificiallawyer.com"]
+    subject_patterns: ["Artificial Lawyer"]
+    tracks: ["A", "C"]
+
+  - name: "Axiom Research Updates"
+    sender_patterns: ["axiomlaw.com"]
+    subject_patterns: ["Axiom", "research", "insight"]
+    tracks: ["A", "C"]
+
+  - name: "PwC Insights"
+    sender_patterns: ["pwc.com"]
+    subject_patterns: ["PwC", "insight", "report"]
+    tracks: ["B", "C"]
+
+  - name: "McKinsey Global Institute"
+    sender_patterns: ["mckinsey.com", "mgi.com"]
+    subject_patterns: ["McKinsey", "Global Institute"]
+    tracks: ["C"]
+
+  - name: "Deloitte Insights"
+    sender_patterns: ["deloitte.com"]
+    subject_patterns: ["Deloitte", "insight"]
+    tracks: ["B", "C"]
+
+  - name: "EY Insights"
+    sender_patterns: ["ey.com"]
+    subject_patterns: ["EY", "Ernst", "Young"]
+    tracks: ["B", "C"]
+
+  - name: "KPMG Insights"
+    sender_patterns: ["kpmg.com"]
+    subject_patterns: ["KPMG"]
+    tracks: ["B", "C"]
+
+  - name: "LevelUp with Ethan Evans"
+    sender_patterns: ["substack.com", "ethanevans"]
+    subject_patterns: ["LevelUp", "Ethan Evans"]
+    tracks: ["C"]
+
+  - name: "Spellbook Newsletter"
+    sender_patterns: ["spellbook.legal", "rallynav.com"]
+    subject_patterns: ["Spellbook"]
+    tracks: ["A", "C"]
+
+  - name: "Harvey Product Updates"
+    sender_patterns: ["harvey.ai"]
+    subject_patterns: ["Harvey", "product update", "release"]
+    tracks: ["A"]
+
+  - name: "Luminance Announcements"
+    sender_patterns: ["luminance.com"]
+    subject_patterns: ["Luminance"]
+    tracks: ["A"]
+
+  - name: "vLex / Vincent Updates"
+    sender_patterns: ["vlex.com"]
+    subject_patterns: ["vLex", "Vincent"]
+    tracks: ["A"]
+
+  - name: "Clio Updates"
+    sender_patterns: ["clio.com"]
+    subject_patterns: ["Clio"]
+    tracks: ["A"]
+
+  - name: "Singapore Academy of Law (SAL)"
+    sender_patterns: ["sal.org.sg"]
+    subject_patterns: ["SAL", "Singapore Academy"]
+    tracks: ["A", "B"]
+
+  - name: "LegalTech GoWhere"
+    sender_patterns: ["legaltechgowhere"]
+    subject_patterns: ["LegalTech GoWhere"]
+    tracks: ["A", "B"]
+
+  - name: "ACC Asia-Pacific"
+    sender_patterns: ["acc.com"]
+    subject_patterns: ["ACC", "Association of Corporate Counsel"]
+    tracks: ["A", "C"]
+
+  - name: "Innovate Legal (Lynette Ooi Substack)"
+    sender_patterns: ["substack.com"]
+    subject_patterns: ["Innovate Legal"]
+    tracks: ["C"]
+
+  - name: "Bob Ambrogi LawSites / LawNext"
+    sender_patterns: ["lawsitesblog.com", "lawnext.com"]
+    subject_patterns: ["LawSites", "LawNext", "Ambrogi"]
+    tracks: ["A", "C"]
+
+  - name: "ALITA Newsletter"
+    sender_patterns: ["alita.asia"]
+    subject_patterns: ["ALITA", "Asia-Pacific Legal Innovation"]
+    tracks: ["A", "B", "C"]

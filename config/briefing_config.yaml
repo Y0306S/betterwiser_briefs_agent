@@ -1,0 +1,198 @@
+# BetterWiser Legal-Tech AI Briefing Agent — Master Configuration
+# Edit recipients, sources, and thresholds here. Never put API keys here.
+
+run:
+  runs_dir: "runs"
+  log_level: "INFO"
+
+model:
+  id: "claude-opus-4-6"
+  extended_thinking_budget: 10000
+  max_tokens: 16000
+  max_context_sources: 30        # max scraped sources sent to Pass 2 draft
+  source_content_max_chars: 4000 # truncate each source to this length
+
+tracks:
+  - id: "A"
+    name: "Vendor & Customer Intelligence"
+    prompt_template: "track_a_vendor_customer.txt"
+    output_format: "date_bullets"
+    item_count_min: 10
+    item_count_max: 15
+  - id: "B"
+    name: "Global AI Policy & Regulatory Watch"
+    prompt_template: "track_b_global_policy.txt"
+    output_format: "bold_summary"
+    item_count_min: 6
+    item_count_max: 8
+  - id: "C"
+    name: "Thought Leadership"
+    prompt_template: "track_c_thought_leadership.txt"
+    output_format: "themed_sections"
+    item_count_min: 5
+    item_count_max: 20
+
+# Authority tiers for source ranking
+authority_tiers:
+  tier_1:
+    - "minlaw.gov.sg"
+    - "sal.org.sg"
+    - "judiciary.gov.sg"
+    - "agc.gov.sg"
+    - "mas.gov.sg"
+    - "mlaw.gov.sg"
+    - "sso.agc.gov.sg"
+    - "imda.gov.sg"
+    - "pdpc.gov.sg"
+    - "digitalstrategy.ec.europa.eu"
+    - "ico.org.uk"
+    - "gov.uk"
+    - "congress.gov"
+    - "ftc.gov"
+    - "nist.gov"
+    - "whitehouse.gov"
+  tier_2:
+    - "artificiallawyer.com"
+    - "lawnext.com"
+    - "law360.com"
+    - "reuters.com"
+    - "ft.com"
+    - "wsj.com"
+    - "bloomberg.com"
+    - "theguardian.com"
+    - "mckinsey.com"
+    - "pwc.com"
+    - "deloitte.com"
+    - "ey.com"
+    - "kpmg.com"
+    - "bcg.com"
+    - "hbr.org"
+    - "weforum.org"
+    - "lexology.com"
+    - "lawgazette.com.sg"
+    - "legaltechnology.com"
+    - "technologist.law"
+    - "legalweek.com"
+
+# Curated URLs to scrape each run (Track A — Primary tier vendors)
+curated_sources:
+  track_A:
+    - url: "https://www.harvey.ai/blog"
+      tier: "primary"
+      vendor: "Harvey"
+    - url: "https://legora.com/blog"
+      tier: "primary"
+      vendor: "Legora"
+    - url: "https://vlex.com/blog"
+      tier: "primary"
+      vendor: "vLex"
+    - url: "https://www.clio.com/blog"
+      tier: "primary"
+      vendor: "Clio"
+    - url: "https://luminance.com/news"
+      tier: "primary"
+      vendor: "Luminance"
+    - url: "https://www.spotdraft.com/blog"
+      tier: "primary"
+      vendor: "SpotDraft"
+    - url: "https://spellbook.legal/blog"
+      tier: "primary"
+      vendor: "Spellbook"
+    - url: "https://anthropic.com/news"
+      tier: "primary"
+      vendor: "Anthropic"
+    - url: "https://sal.org.sg/resources/legal-updates"
+      tier: "primary"
+      vendor: "SAL"
+    - url: "https://www.lawgazette.com.sg"
+      tier: "primary"
+      vendor: "Law Gazette SG"
+  track_B:
+    - url: "https://www.minlaw.gov.sg/news-and-press-releases"
+      tier: "primary"
+      entity: "Singapore MinLaw"
+    - url: "https://digital-strategy.ec.europa.eu/en/policies/ai-office"
+      tier: "primary"
+      entity: "EU AI Office"
+    - url: "https://ico.org.uk/about-the-ico/media-centre"
+      tier: "primary"
+      entity: "UK ICO"
+    - url: "https://www.pdpc.gov.sg/news-and-events/announcements"
+      tier: "primary"
+      entity: "Singapore PDPC"
+    - url: "https://www.mas.gov.sg/news"
+      tier: "primary"
+      entity: "MAS Singapore"
+  track_C:
+    - url: "https://www.mckinsey.com/capabilities/mckinsey-digital/our-insights"
+      tier: "tier_2"
+      entity: "McKinsey"
+    - url: "https://www.pwc.com/sg/en/insights.html"
+      tier: "tier_2"
+      entity: "PwC Singapore"
+    - url: "https://www.ey.com/en_sg/insights"
+      tier: "tier_2"
+      entity: "EY Singapore"
+    - url: "https://www.deloitte.com/global/en/industries/financial-services/perspectives.html"
+      tier: "tier_2"
+      entity: "Deloitte"
+    - url: "https://www.artificiallawyer.com"
+      tier: "tier_2"
+      entity: "Artificial Lawyer"
+
+# Discovery search queries per track (Claude web_search)
+discovery_queries:
+  track_A:
+    - "Harvey AI legal product update {month}"
+    - "Legora legal AI news {month}"
+    - "Singapore law firm AI adoption {year}"
+    - "new legal AI startup funding {year}"
+    - "legal AI vendor partnership announcement {month}"
+    - "Luminance AI legal partnership {month}"
+    - "vLex Vincent legal AI update {month}"
+    - "SpotDraft Clio Spellbook legal AI {month}"
+    - "Singapore legaltech news {month}"
+    - "Singapore Academy of Law AI initiative {year}"
+  track_B:
+    - "APAC AI regulation update {month}"
+    - "EU AI Act enforcement update {month}"
+    - "UK AI governance policy {year}"
+    - "Middle East AI legal policy Dubai Abu Dhabi {year}"
+    - "US AI risk management framework {month}"
+    - "Singapore AI policy {month}"
+    - "Singapore MinLaw generative AI legal sector {year}"
+    - "PDPC personal data AI Singapore {month}"
+  track_C:
+    - "legal AI thought leadership {month}"
+    - "AI workforce transformation legal profession {year}"
+    - "enterprise AI adoption maturity legal services {year}"
+    - "change management generative AI law firms {year}"
+    - "strategic AI value creation professional services {year}"
+
+# Grounding and quality thresholds
+grounding:
+  pass_rate_threshold: 0.95
+  citation_coverage_threshold: 0.90
+  fuzzy_match_threshold: 80       # thefuzz score 0-100
+
+# Auto-expanding vendor watchlist threshold
+vendor_watchlist:
+  auto_add_threshold: 3           # appear in 3+ sources to trigger recommendation
+
+# Email recipients per track
+recipients:
+  A:
+    - email: "lynette@betterwiser.com"
+      name: "Lynette Ooi"
+  B:
+    - email: "lynette@betterwiser.com"
+      name: "Lynette Ooi"
+  C:
+    - email: "lynette@betterwiser.com"
+      name: "Lynette Ooi"
+
+# Email subject templates
+email_subjects:
+  A: "BetterWiser Legal Intelligence — Vendor & Customer Update — {month_human}"
+  B: "BetterWiser Legal Intelligence — Global AI Policy Watch — {month_human}"
+  C: "BetterWiser Legal Intelligence — Thought Leadership Digest — {month_human}"

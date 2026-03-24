@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BetterWiser Briefing Agent</title>
+  <style>
+    :root {
+      --navy:  #1B2A4A;
+      --teal:  #00B4C8;
+      --teal2: #009aac;
+      --bg:    #f4f6f9;
+      --card:  #ffffff;
+      --text:  #1a1a2e;
+      --muted: #6b7280;
+      --border:#e2e8f0;
+      --red:   #dc2626;
+      --green: #16a34a;
+      --amber: #d97706;
+      --radius: 10px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+           background: var(--bg); color: var(--text); font-size: 15px; line-height: 1.6; }
+
+    /* ── Header ── */
+    header {
+      background: var(--navy);
+      color: #fff;
+      padding: 18px 32px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    header .logo { font-size: 22px; font-weight: 700; letter-spacing: -0.5px; }
+    header .logo span { color: var(--teal); }
+    header .subtitle { font-size: 13px; color: #94a3b8; margin-top: 2px; }
+
+    /* ── Layout ── */
+    .container { max-width: 1100px; margin: 0 auto; padding: 32px 24px; }
+
+    /* ── Alerts ── */
+    .alert { border-radius: var(--radius); padding: 14px 18px; margin-bottom: 20px;
+             font-size: 14px; display: flex; align-items: flex-start; gap: 10px; }
+    .alert-warn { background: #fff7ed; border: 1px solid #fed7aa; color: #92400e; }
+    .alert-info  { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; }
+    .alert-icon  { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
+
+    /* ── Cards ── */
+    .card { background: var(--card); border-radius: var(--radius);
+            border: 1px solid var(--border); margin-bottom: 24px; overflow: hidden; }
+    .card-header { background: var(--navy); color: #fff; padding: 14px 20px;
+                   font-weight: 600; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+    .card-body   { padding: 22px 24px; }
+
+    /* ── Form ── */
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    @media (max-width: 640px) { .form-grid { grid-template-columns: 1fr; } }
+
+    .field-label { font-size: 13px; font-weight: 600; color: var(--navy);
+                   margin-bottom: 6px; display: block; }
+    .field-hint  { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+    input[type="month"] {
+      width: 100%; padding: 9px 12px; border: 1px solid var(--border);
+      border-radius: 7px; font-size: 14px; color: var(--text);
+      background: #fff;
+    }
+    input[type="month"]:focus { outline: 2px solid var(--teal); border-color: var(--teal); }
+
+    .track-checkboxes { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 2px; }
+    .track-check { display: flex; align-items: center; gap: 6px; cursor: pointer;
+                   border: 1px solid var(--border); border-radius: 7px;
+                   padding: 8px 14px; background: #f8fafc; font-size: 14px; }
+    .track-check:has(input:checked) { border-color: var(--teal); background: #ecfeff; }
+    .track-check input { accent-color: var(--teal); width: 16px; height: 16px; }
+    .track-check .track-id { font-weight: 700; color: var(--navy); }
+    .track-check .track-name { color: var(--muted); font-size: 12px; }
+
+    .mode-toggle { display: flex; gap: 0; border: 1px solid var(--border); border-radius: 7px;
+                   overflow: hidden; margin-top: 2px; }
+    .mode-btn { flex: 1; padding: 9px 14px; font-size: 13px; font-weight: 500;
+                border: none; background: #f8fafc; cursor: pointer;
+                color: var(--muted); transition: all 0.15s; }
+    .mode-btn.active      { background: var(--navy); color: #fff; }
+    .mode-btn.active-send { background: var(--teal); color: #fff; }
+    .mode-btn:not(.active):hover { background: #f1f5f9; }
+
+    input[type="hidden"] {}
+
+    .btn-primary {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: var(--teal); color: #fff; border: none;
+      padding: 11px 26px; border-radius: 7px; font-size: 15px;
+      font-weight: 600; cursor: pointer; transition: background 0.15s;
+      margin-top: 4px;
+    }
+    .btn-primary:hover { background: var(--teal2); }
+    .btn-primary:disabled { opacity: 0.55; cursor: not-allowed; }
+
+    /* ── Run history table ── */
+    .run-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    .run-table th { text-align: left; font-weight: 600; font-size: 12px; text-transform: uppercase;
+                    letter-spacing: 0.05em; color: var(--muted); padding: 10px 14px;
+                    border-bottom: 1px solid var(--border); background: #f8fafc; }
+    .run-table td { padding: 13px 14px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    .run-table tr:last-child td { border-bottom: none; }
+    .run-table tr:hover td { background: #f8fafc; }
+
+    .badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      border-radius: 999px; padding: 3px 10px; font-size: 12px; font-weight: 500;
+    }
+    .badge-running { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+    .badge-saved   { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+    .badge-sent    { background: #f0fdf4; color: #15803d; border: 1px solid #86efac; }
+    .badge-held    { background: #fff7ed; color: #b45309; border: 1px solid #fde68a; }
+
+    .pulse { display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+             background: #3b82f6; animation: pulse 1.2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+    .track-link {
+      display: inline-flex; align-items: center; gap: 4px;
+      background: var(--navy); color: #fff; border-radius: 5px;
+      padding: 4px 10px; font-size: 12px; font-weight: 600;
+      text-decoration: none; margin-right: 4px;
+      transition: background 0.15s;
+    }
+    .track-link:hover { background: var(--teal); }
+    .track-link.held { background: var(--amber); }
+
+    .run-id-cell { font-family: "SF Mono", "Consolas", monospace; font-size: 12px; color: var(--muted); }
+    a.run-link { color: var(--teal); text-decoration: none; font-weight: 600; }
+    a.run-link:hover { text-decoration: underline; }
+
+    .empty-state { text-align: center; padding: 48px 24px; color: var(--muted); }
+    .empty-state .big-icon { font-size: 48px; margin-bottom: 12px; }
+
+    /* ── Status banner ── */
+    .status-bar { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: var(--radius);
+                  padding: 12px 18px; margin-bottom: 20px; font-size: 14px; color: #1e40af;
+                  display: flex; align-items: center; gap: 10px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="logo">Better<span>Wiser</span> · Briefing Agent</div>
+    <div class="subtitle">Legal-Tech AI Intelligence · Automated Monthly Briefings</div>
+  </div>
+</header>
+
+<div class="container">
+
+  {% if not has_api_key %}
+  <div class="alert alert-warn">
+    <span class="alert-icon">⚠️</span>
+    <div>
+      <strong>ANTHROPIC_API_KEY not configured.</strong>
+      The agent cannot run without this key.
+      Add it to your <code>.env</code> file, then restart the dashboard.
+      See <strong>SETUP_CHECKLIST.md</strong> Part 2.
+    </div>
+  </div>
+  {% endif %}
+
+  {% if not has_azure %}
+  <div class="alert alert-info">
+    <span class="alert-icon">ℹ️</span>
+    <div>
+      <strong>Azure AD not configured.</strong>
+      Inbox reading and email sending are disabled.
+      Briefings will be generated and saved to disk only.
+      See <strong>SETUP_CHECKLIST.md</strong> Part 4 to enable email.
+    </div>
+  </div>
+  {% endif %}
+
+  {% if any_running %}
+  <div class="status-bar">
+    <span class="pulse"></span>
+    A briefing run is currently in progress.
+    <a href="javascript:location.reload()" style="margin-left:auto;color:inherit;font-weight:600">Refresh ↺</a>
+  </div>
+  {% endif %}
+
+  <!-- ── Generate Form ── -->
+  <div class="card">
+    <div class="card-header">⚡ Generate New Briefing</div>
+    <div class="card-body">
+      <form method="POST" action="/run/start" id="runForm">
+        <input type="hidden" name="mode" id="modeInput" value="dry_run" />
+
+        <div class="form-grid">
+          <div>
+            <label class="field-label" for="month">Target Month</label>
+            <input type="month" name="month" id="month" value="{{ default_month }}" required />
+            <div class="field-hint">The briefings will cover news and updates from this month.</div>
+          </div>
+
+          <div>
+            <label class="field-label">Tracks to Generate</label>
+            <div class="track-checkboxes">
+              <label class="track-check">
+                <input type="checkbox" name="tracks" value="A" checked />
+                <span>
+                  <span class="track-id">A</span><br/>
+                  <span class="track-name">Vendor &amp; Customer</span>
+                </span>
+              </label>
+              <label class="track-check">
+                <input type="checkbox" name="tracks" value="B" checked />
+                <span>
+                  <span class="track-id">B</span><br/>
+                  <span class="track-name">AI Policy</span>
+                </span>
+              </label>
+              <label class="track-check">
+                <input type="checkbox" name="tracks" value="C" checked />
+                <span>
+                  <span class="track-id">C</span><br/>
+                  <span class="track-name">Thought Leadership</span>
+                </span>
+              </label>
+            </div>
+          </div>
+
+          <div>
+            <label class="field-label">Delivery Mode</label>
+            <div class="mode-toggle">
+              <button type="button" class="mode-btn active" id="btnDryRun"
+                      onclick="setMode('dry_run')">
+                💾 Save to Disk (Dry Run)
+              </button>
+              <button type="button" class="mode-btn" id="btnSend"
+                      onclick="setMode('send')"
+                      {% if not has_azure %}disabled title="Azure AD not configured"{% endif %}>
+                📧 Send via Email
+              </button>
+            </div>
+            <div class="field-hint" id="modeHint">
+              Briefings will be saved as HTML files. No emails sent.
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top: 20px;">
+          <button type="submit" class="btn-primary" id="submitBtn"
+                  {% if not has_api_key %}disabled title="ANTHROPIC_API_KEY not set"{% endif %}>
+            ▶ Generate Briefing
+          </button>
+          <span style="margin-left:14px; font-size:13px; color:var(--muted);">
+            Takes 15–30 min. Do not close the browser tab.
+          </span>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ── Run History ── -->
+  <div class="card">
+    <div class="card-header">📋 Run History</div>
+    <div class="card-body" style="padding: 0;">
+      {% if runs %}
+      <table class="run-table">
+        <thead>
+          <tr>
+            <th>Month</th>
+            <th>Started</th>
+            <th>Status</th>
+            <th>Briefings</th>
+            <th>Logs</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for run in runs %}
+          <tr>
+            <td>
+              <a href="/run/{{ run.run_id }}" class="run-link">{{ run.month }}</a>
+              <div class="run-id-cell">{{ run.run_id }}</div>
+            </td>
+            <td>{{ run.started_at or "—" }}</td>
+            <td>
+              {% if run.running %}
+                <span class="badge badge-running"><span class="pulse"></span> Running</span>
+              {% elif run.tracks %}
+                <span class="badge badge-saved">✓ Done</span>
+              {% else %}
+                <span class="badge" style="background:#f1f5f9;color:var(--muted);border:1px solid var(--border)">
+                  No output
+                </span>
+              {% endif %}
+            </td>
+            <td>
+              {% for t in run.tracks %}
+                <a href="/run/{{ run.run_id }}/briefing/{{ t.track }}"
+                   class="track-link {% if t.badge == 'held' %}held{% endif %}"
+                   target="_blank"
+                   title="{% if t.badge == 'held' %}Held for review — grounding below threshold{% elif t.badge == 'sent' %}Sent via email{% else %}Saved to disk{% endif %}">
+                  {{ t.track }}
+                  {% if t.badge == 'held' %}⚠{% elif t.badge == 'sent' %}✉{% endif %}
+                </a>
+              {% endfor %}
+              {% if not run.tracks and not run.running %}—{% endif %}
+            </td>
+            <td>
+              {% if run.has_log %}
+                <a href="/run/{{ run.run_id }}" class="run-link" style="font-size:13px;">View logs</a>
+              {% else %}
+                —
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="empty-state">
+        <div class="big-icon">📭</div>
+        <div style="font-weight:600; margin-bottom:6px;">No runs yet</div>
+        <div>Generate your first briefing using the form above.</div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+</div><!-- /container -->
+
+<script>
+  function setMode(mode) {
+    document.getElementById('modeInput').value = mode;
+    const dryBtn  = document.getElementById('btnDryRun');
+    const sendBtn = document.getElementById('btnSend');
+    const hint    = document.getElementById('modeHint');
+    if (mode === 'dry_run') {
+      dryBtn.className  = 'mode-btn active';
+      sendBtn.className = 'mode-btn';
+      hint.textContent  = 'Briefings will be saved as HTML files. No emails sent.';
+    } else {
+      dryBtn.className  = 'mode-btn';
+      sendBtn.className = 'mode-btn active-send';
+      hint.textContent  = 'Briefings will be generated AND sent via Microsoft 365 email.';
+    }
+  }
+
+  // Disable submit while a run is in progress
+  document.getElementById('runForm').addEventListener('submit', function() {
+    const btn = document.getElementById('submitBtn');
+    btn.disabled = true;
+    btn.textContent = '⏳ Generating… (page will redirect)';
+  });
+
+  // Auto-refresh history every 30s if a run is in progress
+  {% if any_running %}
+  setTimeout(function() { location.reload(); }, 30000);
+  {% endif %}
+</script>
+</body>
+</html>
