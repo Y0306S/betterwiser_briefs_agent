@@ -170,7 +170,8 @@ async def _check_single_url(url: str, timeout: float) -> LinkCheckResult:
 
 def _wayback_url(url: str) -> str:
     """Generate a Wayback Machine fallback URL for a dead link."""
-    return f"https://web.archive.org/web/*/{url}"
+    # Use /web/2/ to redirect to the most recent archived snapshot
+    return f"https://web.archive.org/web/2/{url}"
 
 
 def _build_url_replacements(link_results: list[LinkCheckResult]) -> dict[str, str]:
@@ -323,51 +324,51 @@ def _normalise_content_html(html: str) -> str:
     Apply inline styles to common HTML elements for Outlook compatibility.
     Converts CSS classes/tag defaults to inline styles.
     """
-    # Apply inline styles to headings
+    # Apply inline styles — skip elements that already carry a style attribute
     html = re.sub(
-        r"<h1([^>]*)>",
+        r"<h1(?![^>]*\bstyle=)([^>]*)>",
         r'<h1\1 style="font-size:20px;font-weight:bold;color:#1B2A4A;margin:24px 0 8px 0;">',
         html, flags=re.IGNORECASE
     )
     html = re.sub(
-        r"<h2([^>]*)>",
+        r"<h2(?![^>]*\bstyle=)([^>]*)>",
         r'<h2\1 style="font-size:17px;font-weight:bold;color:#1B2A4A;margin:20px 0 8px 0;'
         r'padding-bottom:4px;border-bottom:1px solid #E0E0E0;">',
         html, flags=re.IGNORECASE
     )
     html = re.sub(
-        r"<h3([^>]*)>",
+        r"<h3(?![^>]*\bstyle=)([^>]*)>",
         r'<h3\1 style="font-size:15px;font-weight:bold;color:#0078A8;margin:16px 0 6px 0;">',
         html, flags=re.IGNORECASE
     )
     html = re.sub(
-        r"<p([^>]*)>",
+        r"<p(?![^>]*\bstyle=)([^>]*)>",
         r'<p\1 style="margin:0 0 10px 0;line-height:1.6;color:#4A4A4A;font-size:14px;">',
         html, flags=re.IGNORECASE
     )
     html = re.sub(
-        r"<ul([^>]*)>",
+        r"<ul(?![^>]*\bstyle=)([^>]*)>",
         r'<ul\1 style="margin:0 0 12px 0;padding-left:20px;">',
         html, flags=re.IGNORECASE
     )
     html = re.sub(
-        r"<li([^>]*)>",
+        r"<li(?![^>]*\bstyle=)([^>]*)>",
         r'<li\1 style="margin-bottom:8px;line-height:1.6;color:#4A4A4A;font-size:14px;">',
         html, flags=re.IGNORECASE
     )
     html = re.sub(
-        r"<a ([^>]*href=[^>]+)>",
-        lambda m: f'<a {m.group(1)} style="color:#0078A8;text-decoration:none;">',
+        r"<a ([^>]*href=[^>]+)(?<!\bstyle=[\"'][^\"']*[\"'])>",
+        lambda m: f'<a {m.group(1)} style="color:#0078A8;text-decoration:none;">' if 'style=' not in m.group(1) else f'<a {m.group(1)}>',
         html, flags=re.IGNORECASE
     )
     html = re.sub(
-        r"<strong([^>]*)>",
+        r"<strong(?![^>]*\bstyle=)([^>]*)>",
         r'<strong\1 style="font-weight:bold;color:#1B2A4A;">',
         html, flags=re.IGNORECASE
     )
-    # Remove divs that break Outlook layout
-    html = re.sub(r"<div([^>]*)>", r"<p\1>", html, flags=re.IGNORECASE)
-    html = re.sub(r"</div>", "</p>", html, flags=re.IGNORECASE)
+    # Strip div tags (not convert to p) to avoid creating invalid nested <p> elements
+    html = re.sub(r"<div[^>]*>", "", html, flags=re.IGNORECASE)
+    html = re.sub(r"</div>", "", html, flags=re.IGNORECASE)
 
     return html
 

@@ -384,7 +384,13 @@ async def _gather_phase(
         except Exception as e:
             logger.warning(f"Email-augmented TL Wave 1 supplement failed: {e}")
 
-    all_discovered = discovered + tl_articles
+    # Merge discovered + TL articles, deduplicating by URL
+    _seen_urls: set[str] = set()
+    all_discovered = []
+    for _article in discovered + tl_articles:
+        if _article.url not in _seen_urls:
+            _seen_urls.add(_article.url)
+            all_discovered.append(_article)
 
     stats = GatheringStats(
         emails_read=len(emails),

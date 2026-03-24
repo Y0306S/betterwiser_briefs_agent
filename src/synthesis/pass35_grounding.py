@@ -72,12 +72,20 @@ def run_grounding_verification(
         items = _extract_items_from_html(synthesis)
 
     if not items:
-        logger.info(f"Track {track.value}: Pass 3.5 — no items to ground-check")
+        # If raw_html is non-empty but we extracted 0 items, the HTML uses
+        # non-standard structures that our extractor can't parse — treat as
+        # suspicious rather than vacuously passing.
+        has_content = bool(synthesis.raw_html and synthesis.raw_html.strip())
+        logger.warning(
+            f"Track {track.value}: Pass 3.5 — no items extracted from "
+            f"{'non-empty' if has_content else 'empty'} HTML. "
+            f"{'Flagging for review.' if has_content else 'Skipping.'}"
+        )
         report = GroundingReport(
             total_claims=0,
             grounded_claims=0,
-            pass_rate=1.0,
-            below_threshold=False,
+            pass_rate=0.0 if has_content else 1.0,
+            below_threshold=has_content,
         )
         if 35 not in synthesis.pass_completed:
             synthesis.pass_completed.append(35)

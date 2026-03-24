@@ -117,7 +117,8 @@ async def run_waves(
 
     # Wave 5: Semantic similarity expansion
     logger.info("Wave 5: Semantic similarity expansion")
-    top_articles = all_articles[:10]  # top articles found so far
+    # Seed with richest articles (by snippet length) not just first-inserted
+    top_articles = sorted(all_articles, key=lambda a: len(a.snippet or ""), reverse=True)[:10]
     w5_articles = await _wave5_semantic_expansion(top_articles, month, client, model_id)
     add_articles(w5_articles, wave=5)
     logger.info(f"Wave 5: {len(w5_articles)} additional articles")
@@ -299,7 +300,6 @@ async def _wave2_single_search(
     return _parse_article_array(_extract_text(response))
 
 
-@async_retry(max_attempts=2, base_delay=1.0)
 async def _wave3_firm_pages(
     firms: list[dict],
     month: str,
@@ -316,47 +316,58 @@ async def _wave3_firm_pages(
         global_url = firm.get("insights_url")
         urls_to_try = [u for u in [sg_url, global_url] if u]
 
+        fetched_ok = False
         for insights_url in urls_to_try:
-            try:
-                response = await client.messages.create(
-                    model=model_id,
-                    max_tokens=2048,
-                    tools=[WEB_FETCH_TOOL],
-                    system=(
-                        f"You are extracting recent thought leadership content from {firm_name}'s "
-                        f"insights page. Focus on legal AI, AI governance, and professional services."
-                    ),
-                    messages=[{
-                        "role": "user",
-                        "content": (
-                            f"Fetch {insights_url} and extract all recent articles "
-                            f"(published in {_month_human(month)} or recent months) "
-                            f"about AI, legal technology, workforce transformation, or related themes.\n"
-                            f"Return JSON array: "
-                            f"[{{\"url\", \"title\", \"snippet\", \"source_name\", \"published_date\"}}]"
+            if fetched_ok:
+                break
+            # Retry per-firm URL so a failure on one firm doesn't replay all firms
+            for attempt in range(2):
+                try:
+                    response = await client.messages.create(
+                        model=model_id,
+                        max_tokens=2048,
+                        tools=[WEB_FETCH_TOOL],
+                        system=(
+                            f"You are extracting recent thought leadership content from {firm_name}'s "
+                            f"insights page. Focus on legal AI, AI governance, and professional services."
                         ),
-                    }],
-                )
+                        messages=[{
+                            "role": "user",
+                            "content": (
+                                f"Fetch {insights_url} and extract all recent articles "
+                                f"(published in {_month_human(month)} or recent months) "
+                                f"about AI, legal technology, workforce transformation, or related themes.\n"
+                                f"Return JSON array: "
+                                f"[{{\"url\", \"title\", \"snippet\", \"source_name\", \"published_date\"}}]"
+                            ),
+                        }],
+                    )
 
-                for item in _parse_article_array(_extract_text(response)):
-                    url = item.get("url", "")
-                    if url and url not in seen_urls and url.startswith(("http://", "https://")):
-                        seen_urls.add(url)
-                        articles.append(DiscoveredArticle(
-                            url=url,
-                            title=item.get("title", ""),
-                            snippet=item.get("snippet", ""),
-                            source_name=item.get("source_name", firm_name),
-                            published_date=item.get("published_date"),
-                            track=BriefingTrack.C,
-                            tier=classify_url(url),
-                            discovered_via="claude_web_search",
-                        ))
-                break  # if sg_url worked, don't try global_url
+                    for item in _parse_article_array(_extract_text(response)):
+                        url = item.get("url", "")
+                        if url and url not in seen_urls and url.startswith(("http://", "https://")):
+                            seen_urls.add(url)
+                            articles.append(DiscoveredArticle(
+                                url=url,
+                                title=item.get("title", ""),
+                                snippet=item.get("snippet", ""),
+                                source_name=item.get("source_name", firm_name),
+                                published_date=item.get("published_date"),
+                                track=BriefingTrack.C,
+                                tier=classify_url(url),
+                                discovered_via="claude_web_search",
+                            ))
+                    fetched_ok = True  # sg_url worked, skip global_url
+                    break
 
-            except Exception as e:
-                logger.debug(f"Wave 3 firm page fetch failed for {firm_name} ({insights_url}): {e}")
-                continue
+                except Exception as e:
+                    if attempt == 0:
+                        logger.debug(f"Wave 3 fetch failed for {firm_name} ({insights_url}), retrying: {e}")
+                        import asyncio as _asyncio
+                        await _asyncio.sleep(1.0)
+                    else:
+                        logger.debug(f"Wave 3 firm page fetch failed for {firm_name} ({insights_url}): {e}")
+                    continue
 
     return articles
 

@@ -177,8 +177,8 @@ def _parse_verification_response(
             else:
                 unverified.append(claim[:80])
         else:
-            # No finding = assume verified (conservative)
-            verified += 1
+            # No match on expected format → treat as UNVERIFIED (conservative)
+            unverified.append(claim[:80])
 
     return verified, unverified
 
@@ -221,10 +221,10 @@ def _extract_verifiable_claims(html: str) -> list[str]:
 def _build_verification_docs(gathered: GatheredData, source_max_chars: int) -> list[dict]:
     """Build compact document blocks for fact verification."""
     docs = []
-    for source in gathered.scraped_sources[:15]:  # limit for verification call
+    for source in gathered.scraped_sources[:30]:  # match Pass 2 source limit
         if source.error or not source.content:
             continue
-        content = source.content[:source_max_chars // 2]  # use half length for verification
+        content = source.content[:source_max_chars]  # full length for accurate verification
         docs.append({
             "type": "document",
             "source": {

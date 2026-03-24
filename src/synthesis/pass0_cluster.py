@@ -107,10 +107,7 @@ def _collect_candidates(
 
     # From discovered articles (filtered by track)
     for article in gathered.discovered_articles:
-        if article.track == track or track == BriefingTrack.A:
-            # Track A gets everything; C only gets its own discoveries
-            if track == BriefingTrack.C and article.track != BriefingTrack.C:
-                continue
+        if article.track == track:
             candidates.append({
                 "url": article.url,
                 "title": article.title,
