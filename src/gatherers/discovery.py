@@ -72,7 +72,6 @@ async def discover_articles_all_tracks(
     return all_articles
 
 
-@async_retry(max_attempts=3, base_delay=2.0)
 async def _search_for_track(
     queries: list[str],
     track: BriefingTrack,
@@ -87,7 +86,11 @@ async def _search_for_track(
 
     for query in queries:
         try:
-            articles = await _run_single_query(query, track, system_prompt, client, model_id)
+            # Retry at per-query level so a failure in one query doesn't
+            # restart all queries from scratch.
+            articles = await _run_single_query_with_retry(
+                query, track, system_prompt, client, model_id
+            )
             for article in articles:
                 if article.url not in seen_urls:
                     seen_urls.add(article.url)
@@ -97,6 +100,18 @@ async def _search_for_track(
             continue
 
     return all_articles
+
+
+@async_retry(max_attempts=3, base_delay=2.0)
+async def _run_single_query_with_retry(
+    query: str,
+    track: BriefingTrack,
+    system_prompt: str,
+    client: anthropic.AsyncAnthropic,
+    model_id: str,
+) -> list[DiscoveredArticle]:
+    """Wrapper that applies per-query retry around _run_single_query."""
+    return await _run_single_query(query, track, system_prompt, client, model_id)
 
 
 async def _run_single_query(
@@ -153,10 +168,14 @@ def _extract_articles_from_response(
     # Try to parse JSON array from the response
     try:
         import json
-        # Find JSON array in the response (may be surrounded by other text)
-        json_match = re.search(r"\[[\s\S]*\]", full_text)
+        # Find the first complete JSON array. Use rfind to locate the matching
+        # closing bracket for the first '[', avoiding greedy over-matching when
+        # the model outputs explanation text before or after the JSON.
+        start = full_text.find("[")
+        end = full_text.rfind("]")
+        json_match = (start != -1 and end != -1 and end > start)
         if json_match:
-            raw_items = json.loads(json_match.group())
+            raw_items = json.loads(full_text[start : end + 1])
             for item in raw_items:
                 if not isinstance(item, dict):
                     continue

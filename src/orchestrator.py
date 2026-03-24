@@ -40,6 +40,7 @@ import anthropic
 from src.delivery.archiver import archive_gathered_data, archive_synthesis
 from src.delivery.email_sender import send_briefing
 from src.gatherers import discovery, history_loader, inbox_reader, thought_leadership
+from src.gatherers.thought_leadership import _wave1_newsletter_extraction
 from src.gatherers.web_scraper import scrape_urls
 from src.schemas import (
     BriefingTrack,
@@ -351,7 +352,7 @@ async def _gather_phase(
                 model_id=model_id,
             ) if tl_in_tracks else asyncio.sleep(0, result=[])
         ),
-        history_loader.load_previous_month(run_context.runs_dir, month),    # E
+        asyncio.to_thread(history_loader.load_previous_month, run_context.runs_dir, month),  # E
         return_exceptions=True,
     )
 
@@ -364,24 +365,24 @@ async def _gather_phase(
     tl_articles = _safe_list(tl_result, "thought leadership research")
     history = history_result if isinstance(history_result, str) else None
 
-    # If inbox was available, re-run TL wave 1 with actual emails
-    # (This is a second pass for completeness; first pass used empty emails)
+    # If inbox was available, supplement Wave 1 with actual email content.
+    # Only re-run Wave 1 (newsletter extraction) — NOT all 6 waves — to avoid
+    # doubling the entire TL research cost.
     if emails and tl_in_tracks and not isinstance(tl_result, Exception):
-        logger.info("Supplementing thought leadership with actual email content")
+        logger.info("Supplementing thought leadership Wave 1 with actual email content")
         try:
-            email_tl = await thought_leadership.run_waves(
-                month=month,
+            email_articles, _ = await _wave1_newsletter_extraction(
                 email_sources=emails,
-                watchlist_config=watchlist_config,
+                month=month,
                 client=claude,
                 model_id=model_id,
             )
-            # Merge without duplicates
             existing_urls = {a.url for a in tl_articles}
-            new_articles = [a for a in email_tl if a.url not in existing_urls]
+            new_articles = [a for a in email_articles if a.url not in existing_urls]
             tl_articles.extend(new_articles)
+            logger.info(f"Wave 1 email supplement: {len(new_articles)} new articles added")
         except Exception as e:
-            logger.warning(f"Email-augmented TL research failed: {e}")
+            logger.warning(f"Email-augmented TL Wave 1 supplement failed: {e}")
 
     all_discovered = discovered + tl_articles
 
@@ -435,8 +436,10 @@ async def _synthesise_track(
             f"synthesis/synthesis_track_{track.value}.json"
         )
         if checkpoint:
-            logger.info(f"Track {track.value}: found synthesis checkpoint, loading")
-            # Could load SynthesisResult from checkpoint here; for now re-synthesise
+            logger.info(
+                f"Track {track.value}: synthesis checkpoint found but not loaded "
+                f"— re-synthesising (resume of synthesis not yet implemented)"
+            )
 
     track_config = next(
         (t for t in config.get("tracks", []) if t.get("id") == track.value),

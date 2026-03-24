@@ -224,7 +224,6 @@ async def _wave1_newsletter_extraction(
     return articles, new_people
 
 
-@async_retry(max_attempts=2, base_delay=1.0)
 async def _wave2_person_search(
     persons: list[dict],
     month: str,
@@ -245,27 +244,9 @@ async def _wave2_person_search(
         for raw_query in search_terms:
             query = _parameterise_query(raw_query, month)
             try:
-                response = await client.messages.create(
-                    model=model_id,
-                    max_tokens=1024,
-                    tools=[WEB_SEARCH_TOOL],
-                    system=(
-                        f"You are researching thought leadership by {name} in legal AI. "
-                        f"Find their most recent and insightful publications."
-                    ),
-                    messages=[{
-                        "role": "user",
-                        "content": (
-                            f"Search: {query}\n"
-                            f"Return JSON array: "
-                            f"[{{\"url\", \"title\", \"snippet\", \"source_name\", \"published_date\"}}]. "
-                            f"Only include content actually written by or featuring {name}. "
-                            f"Return ONLY valid JSON."
-                        ),
-                    }],
-                )
-
-                for item in _parse_article_array(_extract_text(response)):
+                # Retry per-query so a single failure doesn't restart all persons.
+                items = await _wave2_single_search(name, query, client, model_id)
+                for item in items:
                     url = item.get("url", "")
                     if url and url not in seen_urls and url.startswith(("http://", "https://")):
                         seen_urls.add(url)
@@ -285,6 +266,37 @@ async def _wave2_person_search(
                 continue
 
     return articles
+
+
+@async_retry(max_attempts=2, base_delay=1.0)
+async def _wave2_single_search(
+    name: str,
+    query: str,
+    client: anthropic.AsyncAnthropic,
+    model_id: str,
+) -> list[dict]:
+    """Single per-query Wave 2 search with retry."""
+    response = await client.messages.create(
+        model=model_id,
+        max_tokens=1024,
+        tools=[WEB_SEARCH_TOOL],
+        system=(
+            f"You are researching thought leadership by {name} in legal AI. "
+            f"Find their most recent and insightful publications."
+        ),
+        messages=[{
+            "role": "user",
+            "content": (
+                f"Search: {query}\n"
+                f"Return JSON array: "
+                f"[{{\"url\": \"...\", \"title\": \"...\", \"snippet\": \"...\", "
+                f"\"source_name\": \"...\", \"published_date\": \"...\"}}]. "
+                f"Only include content actually written by or featuring {name}. "
+                f"Return ONLY valid JSON."
+            ),
+        }],
+    )
+    return _parse_article_array(_extract_text(response))
 
 
 @async_retry(max_attempts=2, base_delay=1.0)
@@ -538,25 +550,32 @@ def _extract_text(response: anthropic.types.Message) -> str:
 def _parse_json_response(text: str) -> Optional[dict]:
     """Try to extract a JSON object from Claude's response text."""
     import json
-    try:
-        match = re.search(r"\{[\s\S]*\}", text)
-        if match:
-            return json.loads(match.group())
-    except (ValueError, KeyError):
-        pass
+    # Use find/rfind instead of greedy regex to avoid matching across
+    # multiple JSON objects when the model produces extra text.
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        try:
+            return json.loads(text[start : end + 1])
+        except (ValueError, KeyError):
+            pass
     return None
 
 
 def _parse_article_array(text: str) -> list[dict]:
     """Try to extract a JSON array of article objects from text."""
     import json
-    try:
-        match = re.search(r"\[[\s\S]*\]", text)
-        if match:
-            data = json.loads(match.group())
-            return [item for item in data if isinstance(item, dict)]
-    except (ValueError, KeyError):
-        pass
+    # Use find/rfind: first '[' to last ']' — handles arrays with objects
+    # that themselves contain brackets, while avoiding runaway greedy matching.
+    start = text.find("[")
+    end = text.rfind("]")
+    if start != -1 and end != -1 and end > start:
+        try:
+            data = json.loads(text[start : end + 1])
+            if isinstance(data, list):
+                return [item for item in data if isinstance(item, dict)]
+        except (ValueError, KeyError):
+            pass
     return []
 
 

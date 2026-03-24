@@ -61,7 +61,8 @@ def run_grounding_verification(
             pass_rate=1.0,
             below_threshold=False,
         )
-        synthesis.pass_completed.append(35)
+        if 35 not in synthesis.pass_completed:
+            synthesis.pass_completed.append(35)
         return synthesis, report
 
     # If items are populated from a previous pass, use them
@@ -78,7 +79,8 @@ def run_grounding_verification(
             pass_rate=1.0,
             below_threshold=False,
         )
-        synthesis.pass_completed.append(35)
+        if 35 not in synthesis.pass_completed:
+            synthesis.pass_completed.append(35)
         return synthesis, report
 
     logger.info(
@@ -100,7 +102,8 @@ def run_grounding_verification(
             f"Briefing will be held for human review."
         )
 
-    synthesis.pass_completed.append(35)
+    if 35 not in synthesis.pass_completed:
+        synthesis.pass_completed.append(35)
     return synthesis, report
 
 

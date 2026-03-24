@@ -10,7 +10,7 @@ Validate on write, validate on read.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 from pydantic import BaseModel, Field, field_validator
@@ -47,14 +47,16 @@ class RunContext(BaseModel):
     send: bool = False                   # explicit --send flag required to email
     resume: bool = False
     runs_dir: str = "runs"
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
 
     @field_validator("month")
     @classmethod
     def validate_month(cls, v: str) -> str:
         import re
-        if not re.match(r"^\d{4}-\d{2}$", v):
-            raise ValueError(f"month must be YYYY-MM format, got: {v}")
+        if not re.match(r"^\d{4}-(0[1-9]|1[0-2])$", v):
+            raise ValueError(
+                f"month must be YYYY-MM format with month 01-12, got: {v!r}"
+            )
         return v
 
 

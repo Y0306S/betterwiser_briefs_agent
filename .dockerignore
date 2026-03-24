@@ -1,0 +1,36 @@
+# Secrets — NEVER include in image layers
+.env
+*.pem
+*.key
+
+# Run outputs — potentially large and sensitive
+runs/
+
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+
+# Git history (not needed in image)
+.git/
+
+# Docs and dev files
+*.md
+*.docx
+*.pdf
+SETUP*

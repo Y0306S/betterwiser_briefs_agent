@@ -55,7 +55,8 @@ async def fact_check(
 
     if not claims:
         logger.info(f"Track {synthesis.track.value}: Pass 3 — no claims to verify")
-        synthesis.pass_completed.append(3)
+        if 3 not in synthesis.pass_completed:
+            synthesis.pass_completed.append(3)
         return synthesis
 
     logger.info(
@@ -68,7 +69,8 @@ async def fact_check(
 
     if not source_docs:
         logger.warning(f"Track {synthesis.track.value}: Pass 3 — no source documents available")
-        synthesis.pass_completed.append(3)
+        if 3 not in synthesis.pass_completed:
+            synthesis.pass_completed.append(3)
         return synthesis
 
     # Run verification in batches to avoid context overflow
@@ -98,7 +100,8 @@ async def fact_check(
         # Annotate synthesis with coverage rate for downstream use
         synthesis.raw_html = _annotate_unverified(synthesis.raw_html, unverified_claims)
 
-    synthesis.pass_completed.append(3)
+    if 3 not in synthesis.pass_completed:
+        synthesis.pass_completed.append(3)
     return synthesis
 
 
@@ -146,8 +149,12 @@ async def _verify_claim_batch(
         return _parse_verification_response(claims, response_text)
 
     except Exception as e:
-        logger.warning(f"Claim batch verification failed: {e}")
-        return len(claims), []  # assume verified on error to not block pipeline
+        logger.warning(
+            f"Claim batch verification failed: {e}. "
+            f"Treating {len(claims)} claims as UNVERIFIED (conservative)."
+        )
+        # Return 0 verified so coverage drops and may trigger held_for_review
+        return 0, [c[:80] for c in claims]
 
 
 def _parse_verification_response(

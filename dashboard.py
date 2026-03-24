@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -25,6 +26,7 @@ from dotenv import load_dotenv
 from flask import (
     Flask,
     Response,
+    abort,
     jsonify,
     redirect,
     render_template,
@@ -42,6 +44,33 @@ RUNS_DIR.mkdir(exist_ok=True)
 # Track running processes: run_id -> Popen
 _processes: dict[str, subprocess.Popen] = {}
 _lock = threading.Lock()
+
+# Allowlisted track values
+_VALID_TRACKS = {"A", "B", "C"}
+# run_id must be YYYY-MM_run_YYYYMMDDTHHMMSS (only safe filesystem chars)
+_RUN_ID_RE = re.compile(r"^\d{4}-\d{2}_run_\d{8}T\d{6}(?:_\w+)?$")
+
+
+def _safe_run_id(run_id: str) -> str:
+    """Validate run_id against allowlist pattern. Abort 400 if invalid."""
+    if not _RUN_ID_RE.match(run_id):
+        abort(400, description=f"Invalid run_id: {run_id!r}")
+    return run_id
+
+
+def _safe_track(track: str) -> str:
+    """Validate track is one of A/B/C. Abort 400 if invalid."""
+    if track not in _VALID_TRACKS:
+        abort(400, description=f"Invalid track: {track!r}")
+    return track
+
+
+def _safe_run_dir(run_id: str) -> Path:
+    """Resolve run directory and confirm it stays inside RUNS_DIR."""
+    run_dir = (RUNS_DIR / run_id).resolve()
+    if not str(run_dir).startswith(str(RUNS_DIR.resolve())):
+        abort(400, description="Invalid run path")
+    return run_dir
 
 
 # ---------------------------------------------------------------------------
@@ -172,7 +201,14 @@ def start_run():
         return redirect(url_for("index") + "?error=no_api_key")
 
     month = request.form.get("month") or datetime.now().strftime("%Y-%m")
-    tracks = request.form.getlist("tracks") or ["A", "B", "C"]
+    # Validate month format YYYY-MM with valid month range
+    if not re.match(r"^\d{4}-(0[1-9]|1[0-2])$", month):
+        return redirect(url_for("index") + "?error=invalid_month")
+    # Validate tracks: only allow A, B, C
+    raw_tracks = request.form.getlist("tracks") or ["A", "B", "C"]
+    tracks = [t for t in raw_tracks if t in _VALID_TRACKS]
+    if not tracks:
+        tracks = ["A", "B", "C"]
     mode = request.form.get("mode", "dry_run")
 
     ts = datetime.now().strftime("%Y%m%dT%H%M%S")
@@ -195,7 +231,8 @@ def start_run():
 
 @app.route("/run/<run_id>")
 def run_detail(run_id: str):
-    run_dir = RUNS_DIR / run_id
+    _safe_run_id(run_id)
+    run_dir = _safe_run_dir(run_id)
     with _lock:
         is_running = run_id in _processes and _processes[run_id].poll() is None
 
@@ -232,7 +269,9 @@ def run_detail(run_id: str):
 @app.route("/run/<run_id>/logs")
 def stream_logs(run_id: str):
     """Server-Sent Events endpoint — streams run.log in real time."""
-    log_file = RUNS_DIR / run_id / "run.log"
+    _safe_run_id(run_id)
+    run_dir = _safe_run_dir(run_id)
+    log_file = run_dir / "run.log"
 
     def generate():
         # Wait up to 6 seconds for log file to appear
@@ -282,17 +321,26 @@ def stream_logs(run_id: str):
 
 @app.route("/run/<run_id>/briefing/<track>")
 def view_briefing(run_id: str, track: str):
-    html_file = RUNS_DIR / run_id / "delivery" / f"track_{track}.html"
+    _safe_run_id(run_id)
+    _safe_track(track)
+    run_dir = _safe_run_dir(run_id)
+    html_file = run_dir / "delivery" / f"track_{track}.html"
     if not html_file.exists():
         return f"<p>Briefing track_{track}.html not found in {run_id}.</p>", 404
-    return send_file(str(html_file.resolve()), mimetype="text/html")
+    # Final path check: confirm file is inside the expected delivery dir
+    resolved = html_file.resolve()
+    expected_prefix = str((run_dir / "delivery").resolve())
+    if not str(resolved).startswith(expected_prefix):
+        abort(400)
+    return send_file(str(resolved), mimetype="text/html")
 
 
 @app.route("/api/run/<run_id>/status")
 def api_status(run_id: str):
+    _safe_run_id(run_id)
     with _lock:
         is_running = run_id in _processes and _processes[run_id].poll() is None
-    run_dir = RUNS_DIR / run_id
+    run_dir = _safe_run_dir(run_id)
     tracks_done = []
     delivery_dir = run_dir / "delivery"
     if delivery_dir.exists():
@@ -305,9 +353,14 @@ def api_status(run_id: str):
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
+    # Bind to localhost ONLY — the dashboard has no authentication and exposes
+    # run controls and briefing content. Never expose to 0.0.0.0 in production.
+    host = os.getenv("DASHBOARD_HOST", "127.0.0.1")
+    port = int(os.getenv("DASHBOARD_PORT", "5000"))
     print()
     print("  BetterWiser Briefing Agent Dashboard")
     print("  ─────────────────────────────────────")
-    print("  Open in your browser: http://localhost:5000")
+    print(f"  Open in your browser: http://{host}:{port}")
+    print("  ⚠  Accessible on this machine only (localhost binding).")
     print()
-    app.run(host="0.0.0.0", port=5000, debug=False, threaded=True)
+    app.run(host=host, port=port, debug=False, threaded=True)

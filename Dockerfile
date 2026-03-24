@@ -22,8 +22,13 @@ RUN python -m playwright install chromium --with-deps
 
 COPY . .
 
-# Create runs directory
-RUN mkdir -p runs
+# Create runs directory and set ownership
+RUN mkdir -p runs && \
+    useradd -m -u 1000 agent && \
+    chown -R agent:agent /app
+
+# Drop root privileges — never run as root in production
+USER agent
 
 ENTRYPOINT ["python", "-m", "src.orchestrator"]
 CMD ["--help"]

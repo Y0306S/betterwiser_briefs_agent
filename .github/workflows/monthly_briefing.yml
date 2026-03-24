@@ -21,11 +21,11 @@ on:
       dry_run:
         description: 'Dry run only? (true = save to artifacts, false = send emails)'
         required: false
-        default: 'false'
+        default: 'true'
         type: choice
         options:
-          - 'false'
           - 'true'
+          - 'false'
 
 # ── Job ───────────────────────────────────────────────────────
 jobs:
@@ -89,7 +89,9 @@ jobs:
           echo "track_args=$TRACK_ARGS" >> $GITHUB_OUTPUT
 
           # Determine send/dry-run
-          DRY="${{ github.event.inputs.dry_run || 'false' }}"
+          # Scheduled runs default to dry-run (safe); only manual dispatch
+          # with dry_run=false will actually send emails.
+          DRY="${{ github.event.inputs.dry_run || 'true' }}"
           if [ "$DRY" = "true" ]; then
             echo "send_arg=--dry-run" >> $GITHUB_OUTPUT
           else

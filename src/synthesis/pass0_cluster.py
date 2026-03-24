@@ -207,9 +207,20 @@ def _annotate_hot_vendors(
         return clusters
 
     history_lower = historical_context.lower()
+    # Common stopwords to skip when picking a representative vendor token
+    _STOPWORDS = {
+        "the", "a", "an", "on", "in", "at", "of", "to", "for",
+        "and", "or", "is", "are", "was", "were", "with", "from",
+        "new", "ai", "legal", "law", "firm", "global", "update",
+    }
+
     for cluster in clusters:
-        # Simple heuristic: check if the theme/title appears in historical content
-        vendor_name = cluster.theme.split()[0].lower() if cluster.theme else ""
+        # Use the longest non-stopword token as a proxy for the vendor/entity name.
+        # This avoids picking common words like "Singapore" or "On" as the key.
+        words = [w.lower().strip(".,;:()[]") for w in cluster.theme.split() if w]
+        candidates = [w for w in words if w not in _STOPWORDS and len(w) > 3]
+        vendor_name = max(candidates, key=len) if candidates else (words[0] if words else "")
+
         if vendor_name and vendor_name not in history_lower:
             cluster.is_new_entrant = True
         # Check for repeat mentions
