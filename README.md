@@ -47,20 +47,53 @@ python -m src.orchestrator --month 2026-03 --send
 ┌─────────────────────────────────────────────────────────────────────┐
 │                    BETTERWISER BRIEFING AGENT                       │
 │                                                                     │
-│  ┌──────────┐    ┌──────────┐    ┌────────────┐    ┌──────────┐   │
-│  │ PHASE 1  │───▶│ PHASE 2  │───▶│  PHASE 3   │───▶│ PHASE 4  │   │
-│  │ TRIGGER  │    │  GATHER  │    │ SYNTHESISE │    │ VALIDATE │   │
-│  └──────────┘    └──────────┘    └────────────┘    └──────────┘   │
-│  Build context   5 sub-pipelines  6-pass pipeline   Grounding       │
-│  Load config     run in parallel  per track         + links         │
-│                                                          │          │
-│                                                    ┌──────────┐    │
-│                                                    │ PHASE 5  │    │
-│                                                    │ DELIVER  │    │
-│                                                    └──────────┘    │
-│                                                    Save HTML +     │
-│                                                    Send via email   │
+│  ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌────────────┐   │
+│  │ PHASE 0  │───▶│ PHASE 1  │───▶│ PHASE 2  │───▶│  PHASE 3   │   │
+│  │ CONTEXT  │    │ TRIGGER  │    │  GATHER  │    │ SYNTHESISE │   │
+│  │ UPDATE   │    │          │    │          │    │            │   │
+│  └──────────┘    └──────────┘    └──────────┘    └────────────┘   │
+│  LinkedIn +      Build context   5 sub-pipelines  6-pass pipeline   │
+│  web search      Load config     run in parallel  per track         │
+│  refresh                                               │            │
+│  context.txt                                     ┌──────────┐      │
+│                                                  │ PHASE 4  │      │
+│                                                  │ VALIDATE │      │
+│                                                  └────┬─────┘      │
+│                                                       │            │
+│                                                  ┌──────────┐      │
+│                                                  │ PHASE 5  │      │
+│                                                  │ DELIVER  │      │
+│                                                  └──────────┘      │
+│                                                  Save HTML +       │
+│                                                  Send via email    │
 └─────────────────────────────────────────────────────────────────────┘
+```
+
+### Phase 0: Automatic Context Update
+
+Before each monthly run, the agent checks Lynette Ooi's LinkedIn profile
+(`https://www.linkedin.com/in/lynetteooi/`) and runs targeted web searches to
+detect any changes since the last update:
+
+- New roles, publications, speaking engagements, advisory board appointments
+- New BetterWiser services, partnerships, or client segments
+- Updated strategic priorities or ecosystem positions
+
+Claude compares the gathered intelligence against the current
+`config/betterwiser_context.txt` and rewrites only the sections that reflect
+verified new facts — tone, structure, and unaffected content are left untouched.
+
+**Audit trail:** A timestamped backup is written to `config/context_backups/`
+before every change.  The update is idempotent — re-running the same month skips
+the check entirely.
+
+**GitHub Actions:** Any context change is automatically committed back to the
+repository with a `[skip ci]` commit, so the repo always reflects the latest
+profile state.
+
+**To skip** the context update on a specific run:
+```bash
+python -m src.orchestrator --skip-context-update --month 2026-03
 ```
 
 ### Phase 2: Intelligence Gathering (5 Sub-Pipelines in Parallel)
@@ -243,9 +276,10 @@ The workflow at [.github/workflows/monthly_briefing.yml](.github/workflows/month
 **What happens automatically each month:**
 1. GitHub spins up a cloud machine
 2. Installs all dependencies
-3. Runs the full pipeline and sends emails
-4. Uploads the HTML briefings as downloadable artifacts
-5. Machine shuts down — you pay nothing
+3. **Phase 0:** Checks Lynette Ooi's LinkedIn profile and updates `config/betterwiser_context.txt` if needed, committing any changes back to the repo
+4. Runs the full pipeline and sends emails
+5. Uploads the HTML briefings as downloadable artifacts
+6. Machine shuts down — you pay nothing
 
 **To trigger manually** (e.g. test a specific month):
 - Go to your repo on GitHub
@@ -300,7 +334,8 @@ betterwiser_briefs_agent/
 │
 ├── config/                        ← Edit these to customise behaviour
 │   ├── briefing_config.yaml       ← Recipients, model, thresholds, queries
-│   ├── betterwiser_context.txt    ← Company context for Track C
+│   ├── betterwiser_context.txt    ← Company context for Track C (auto-updated monthly)
+│   ├── context_backups/           ← Timestamped backups before each context change
 │   ├── newsletter_subscriptions.yaml
 │   ├── vendor_watchlist.yaml
 │   └── prompt_templates/
@@ -308,7 +343,8 @@ betterwiser_briefs_agent/
 ├── src/
 │   ├── orchestrator.py            ← CLI entry point
 │   ├── schemas.py                 ← All Pydantic v2 data models
-│   ├── gatherers/                 ← Phase 2: 5 data sub-pipelines
+│   ├── gatherers/                 ← Phase 0 + Phase 2 data gathering
+│   │   ├── profile_updater.py     ← Phase 0: LinkedIn + web search context refresh
 │   ├── synthesis/                 ← Phase 3: 6-pass synthesis
 │   ├── delivery/                  ← Phase 5: archive + email
 │   └── utils/                     ← Shared helpers
@@ -350,7 +386,8 @@ Layer 3: HELD FOR REVIEW   Below 95% → saved to disk, NOT emailed,
 | Component | Per Monthly Run |
 |-----------|----------------|
 | Claude Opus 4.6 (synthesis) | ~$15–20 |
-| Claude web searches (150–250) | ~$1.50–2.50 |
+| Claude web searches (150–255) | ~$1.50–2.55 |
+| Phase 0: LinkedIn profile + web searches (~5 queries) | ~$0.05 |
 | Tavily deep research | ~$0.50–1.00 |
 | Jina Reader | Free |
 | Spider API | ~$0.02 |

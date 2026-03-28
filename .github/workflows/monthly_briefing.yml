@@ -114,6 +114,23 @@ jobs:
             ${{ steps.args.outputs.track_args }} \
             ${{ steps.args.outputs.send_arg }}
 
+      # ── 7b. Commit context update back to repo (if changed) ───
+      # Phase 0 may have updated config/betterwiser_context.txt and written a
+      # backup under config/context_backups/.  Commit both so the repo always
+      # reflects the latest profile state and the audit trail is preserved.
+      - name: Commit context update (if changed)
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Stage context file and backups only — never stage run outputs
+          git add config/betterwiser_context.txt config/context_backups/ || true
+          if git diff --cached --quiet; then
+            echo "No context changes to commit."
+          else
+            git commit -m "chore: auto-update betterwiser_context.txt for ${{ steps.args.outputs.month }} [skip ci]"
+            git push
+          fi
+
       # ── 8. Upload briefings as downloadable artifacts ─────────
       # Even if email was sent, the HTML files are available here for 30 days
       - name: Upload briefing HTML files

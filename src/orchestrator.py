@@ -40,6 +40,7 @@ import anthropic
 from src.delivery.archiver import archive_gathered_data, archive_synthesis
 from src.delivery.email_sender import send_briefing
 from src.gatherers import discovery, history_loader, inbox_reader, thought_leadership
+from src.gatherers.profile_updater import update_context_if_needed
 from src.gatherers.thought_leadership import _wave1_newsletter_extraction
 from src.gatherers.web_scraper import scrape_urls
 from src.schemas import (
@@ -99,12 +100,19 @@ logger = logging.getLogger(__name__)
     help="Resume from a previous failed run. Provide the run directory path.",
     metavar="PATH",
 )
+@click.option(
+    "--skip-context-update",
+    is_flag=True,
+    default=False,
+    help="Skip Phase 0 LinkedIn profile check and betterwiser_context.txt update.",
+)
 def main(
     month: Optional[str],
     track: tuple[str, ...],
     dry_run: bool,
     send: bool,
     resume_path: Optional[str],
+    skip_context_update: bool,
 ) -> None:
     """
     BetterWiser Legal-Tech AI Briefing Agent.
@@ -143,6 +151,7 @@ def main(
         dry_run=dry_run,
         send=send,
         resume_path=resume_path,
+        skip_context_update=skip_context_update,
     ))
     sys.exit(exit_code)
 
@@ -157,9 +166,10 @@ async def _run_pipeline(
     dry_run: bool,
     send: bool,
     resume_path: Optional[str],
+    skip_context_update: bool = False,
 ) -> int:
     """
-    Execute the full 5-phase briefing pipeline.
+    Execute the full 5-phase briefing pipeline (plus Phase 0 context update).
     Returns 0 on success, 1 on fatal error.
     """
     # ---------------------------------------------------------------------------
@@ -213,6 +223,30 @@ async def _run_pipeline(
 
     # Save RunContext for resume capability
     _save_checkpoint(run_context.model_dump_json(indent=2), run_id, runs_dir, "run_context.json")
+
+    # ---------------------------------------------------------------------------
+    # Phase 0: Context Update — refresh betterwiser_context.txt from LinkedIn
+    # ---------------------------------------------------------------------------
+    if not skip_context_update and not resume_path:
+        try:
+            context_updated = await update_context_if_needed(
+                client=claude,
+                model_id=model_id,
+                month=month,
+            )
+            if context_updated:
+                logger.info(
+                    "Phase 0: betterwiser_context.txt refreshed — "
+                    "Track C commentary will use the updated profile"
+                )
+        except Exception as e:
+            # Phase 0 is non-fatal: if it fails the pipeline continues with
+            # the existing context file.
+            logger.warning(f"Phase 0: Context update failed (non-fatal): {e}")
+    elif skip_context_update:
+        logger.info("Phase 0: Skipped (--skip-context-update flag set)")
+    else:
+        logger.info("Phase 0: Skipped (resume mode — context already up to date)")
 
     # ---------------------------------------------------------------------------
     # Phase 2: Gather — 5 parallel sub-pipelines
