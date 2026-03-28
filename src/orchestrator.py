@@ -422,6 +422,16 @@ async def _gather_phase(
             logger.info(f"Wave 1 email supplement: {len(new_articles)} new articles added")
         except Exception as e:
             logger.warning(f"Email-augmented TL Wave 1 supplement failed: {e}")
+    else:
+        if not emails:
+            logger.info(
+                "No emails available — Track C thought leadership will rely on "
+                "web search waves (2–6) and Tavily only"
+            )
+        elif not tl_in_tracks:
+            logger.debug("Track C not selected — skipping email Wave 1 supplement")
+        else:
+            logger.debug("Track C thought leadership result unavailable — skipping email supplement")
 
     # Merge discovered + TL articles, deduplicating by URL
     _seen_urls: set[str] = set()

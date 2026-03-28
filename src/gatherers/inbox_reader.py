@@ -150,7 +150,13 @@ async def _read_inbox_with_graph(month: str) -> list[EmailSource]:
         if not getattr(messages_page, "odata_next_link", None):
             break  # no more pages
 
-    logger.info(f"Read {len(email_sources)} emails from inbox for {month}")
+    if email_sources:
+        logger.info(f"Read {len(email_sources)} emails from inbox for {month}")
+    else:
+        logger.info(
+            f"No emails found in inbox for {month} — "
+            "pipeline will continue using web and discovery sources only"
+        )
     return email_sources
 
 
