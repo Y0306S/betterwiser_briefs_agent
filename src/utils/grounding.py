@@ -158,7 +158,7 @@ def _chunk_text(text: str, window: int = 300, overlap: int = 50) -> list[str]:
     if len(words) <= window:
         return [text]
     chunks = []
-    step = window - overlap
+    step = max(1, window - overlap)
     for i in range(0, len(words) - window + 1, step):
         chunks.append(" ".join(words[i : i + window]))
     # Always include last window

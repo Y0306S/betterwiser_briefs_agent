@@ -71,7 +71,7 @@ class ScrapedSource(BaseModel):
     content: str                         # cleaned markdown/text
     tier: SourceTier
     scraper_used: str                    # "jina" | "spider" | "crawl4ai" | "none"
-    scraped_at: datetime = Field(default_factory=datetime.utcnow)
+    scraped_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
     word_count: int = 0
     error: Optional[str] = None          # populated if scraper partially failed
 

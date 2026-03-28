@@ -357,7 +357,7 @@ def _normalise_content_html(html: str) -> str:
         html, flags=re.IGNORECASE
     )
     html = re.sub(
-        r"<a ([^>]*href=[^>]+)(?<!\bstyle=[\"'][^\"']*[\"'])>",
+        r"<a ([^>]*href=[^>]+)>",
         lambda m: f'<a {m.group(1)} style="color:#0078A8;text-decoration:none;">' if 'style=' not in m.group(1) else f'<a {m.group(1)}>',
         html, flags=re.IGNORECASE
     )

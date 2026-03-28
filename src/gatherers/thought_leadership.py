@@ -385,13 +385,15 @@ async def _wave4_tavily(month: str, tavily_api_key: str) -> list[DiscoveredArtic
     ]
 
     try:
+        import asyncio
         from tavily import TavilyClient
         tavily = TavilyClient(api_key=tavily_api_key)
 
         for query in thematic_queries:
             try:
-                result = tavily.search(
-                    query=query,
+                result = await asyncio.to_thread(
+                    tavily.search,
+                    query,
                     search_depth="advanced",
                     max_results=10,
                     include_answer=False,
