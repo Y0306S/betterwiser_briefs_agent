@@ -34,6 +34,10 @@ See [.github/workflows/monthly_briefing.yml](.github/workflows/monthly_briefing.
 
 ### Option 3 — Command Line (For developers)
 ```bash
+# Dry run (default): generate briefings, save to disk, no email sent
+python -m src.orchestrator --month 2026-03
+
+# Send emails: --send automatically disables dry-run
 python -m src.orchestrator --month 2026-03 --send
 ```
 

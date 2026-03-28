@@ -82,10 +82,6 @@ async def draft_briefing(
     month_end_day = _last_day_of_month(gathered.run_context.month)
     month_end = f"{gathered.run_context.month}-{month_end_day:02d}"
 
-    # Inject BetterWiser context into system prompt for Track C
-    if betterwiser_context:
-        system_prompt = system_prompt.replace("{betterwiser_context}", betterwiser_context)
-
     # Build user message with cluster context
     cluster_summary = _build_cluster_summary(clusters)
     user_content_parts = source_docs + [
@@ -104,7 +100,8 @@ async def draft_briefing(
         }
     ]
 
-    # Template parameter substitution in system prompt
+    # Template parameter substitution in system prompt — date/month placeholders first,
+    # then betterwiser_context last so its content cannot accidentally match a placeholder.
     system_prompt = (
         system_prompt
         .replace("{target_month_human}", month_human)
@@ -112,6 +109,8 @@ async def draft_briefing(
         .replace("{month_end}", month_end)
         .replace("{year}", year)
     )
+    if betterwiser_context:
+        system_prompt = system_prompt.replace("{betterwiser_context}", betterwiser_context)
 
     logger.info(
         f"Track {track.value}: Pass 2 draft — {len(source_docs)} source documents, "

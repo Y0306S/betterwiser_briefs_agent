@@ -131,7 +131,7 @@ def main(
         # Generate Track C only for March 2026
         python -m src.orchestrator --month 2026-03 --track C
 
-        # Generate and send all tracks (requires Azure AD setup)
+        # Generate and send all tracks (--send disables dry-run automatically)
         python -m src.orchestrator --month 2026-03 --send
 
         # Resume a failed run
@@ -143,6 +143,11 @@ def main(
 
     # Determine tracks
     tracks = [BriefingTrack(t) for t in track] if track else list(BriefingTrack)
+
+    # --send implicitly disables dry-run: there is no reason to request a send
+    # and keep dry_run=True, and the flag combination is a common user mistake.
+    if send:
+        dry_run = False
 
     # Exit code: 0 on success, 1 on failure
     exit_code = asyncio.run(_run_pipeline(

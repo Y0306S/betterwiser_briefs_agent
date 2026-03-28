@@ -93,35 +93,51 @@ async def _read_inbox_with_graph(month: str) -> list[EmailSource]:
     logger.info(f"Reading inbox for {user_email} from {month_start} to {month_end}")
 
     email_sources: list[EmailSource] = []
-    page_size = 50
-    skip = 0
 
+    try:
+        from msgraph.generated.users.item.messages.messages_request_builder import (
+            MessagesRequestBuilder,
+        )
+        from kiota_abstractions.base_request_configuration import RequestConfiguration
+    except ImportError as e:
+        logger.warning(f"msgraph request builder not available: {e}")
+        return []
+
+    # Build the first-page request. Subsequent pages use @odata.nextLink from
+    # the response — Graph does not support reliable $skip + $filter pagination.
+    query_params = MessagesRequestBuilder.MessagesRequestBuilderGetQueryParameters(
+        filter=f"receivedDateTime ge {month_start} and receivedDateTime le {month_end}",
+        top=50,
+        select=["id", "subject", "from", "receivedDateTime",
+                "body", "hasAttachments", "bodyPreview"],
+        orderby=["receivedDateTime desc"],
+    )
+    request_config = RequestConfiguration(query_parameters=query_params)
+
+    messages_page = None
+    page_num = 0
     while True:
         try:
-            from msgraph.generated.users.item.messages.messages_request_builder import (
-                MessagesRequestBuilder,
-            )
-            from kiota_abstractions.base_request_configuration import RequestConfiguration
-
-            query_params = MessagesRequestBuilder.MessagesRequestBuilderGetQueryParameters(
-                filter=f"receivedDateTime ge {month_start} and receivedDateTime le {month_end}",
-                top=page_size,
-                skip=skip,
-                select=["id", "subject", "from", "receivedDateTime",
-                        "body", "hasAttachments", "bodyPreview"],
-                orderby=["receivedDateTime desc"],
-            )
-            request_config = RequestConfiguration(query_parameters=query_params)
-
-            messages_page = await graph_client.users.by_user_id(user_email)\
-                .messages.get(request_configuration=request_config)
-
+            if messages_page is None:
+                # First page
+                messages_page = await graph_client.users.by_user_id(user_email)\
+                    .messages.get(request_configuration=request_config)
+            else:
+                # Subsequent pages via nextLink cursor
+                next_link = getattr(messages_page, "odata_next_link", None)
+                if not next_link:
+                    break
+                messages_page = await graph_client.users.by_user_id(user_email)\
+                    .messages.with_url(next_link).get()
         except Exception as e:
-            logger.warning(f"MS Graph messages query failed: {e}")
+            logger.warning(f"MS Graph messages query failed (page {page_num}): {e}")
             break
 
         if not messages_page or not messages_page.value:
             break
+
+        page_num += 1
+        logger.debug(f"Fetched {len(messages_page.value)} emails (page {page_num})")
 
         for msg in messages_page.value:
             email_source = _map_message_to_email_source(msg)
@@ -131,11 +147,8 @@ async def _read_inbox_with_graph(month: str) -> list[EmailSource]:
                 )
             email_sources.append(email_source)
 
-        logger.debug(f"Fetched {len(messages_page.value)} emails (skip={skip})")
-
-        if len(messages_page.value) < page_size:
-            break  # last page
-        skip += page_size
+        if not getattr(messages_page, "odata_next_link", None):
+            break  # no more pages
 
     logger.info(f"Read {len(email_sources)} emails from inbox for {month}")
     return email_sources

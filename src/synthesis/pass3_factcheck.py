@@ -219,22 +219,46 @@ def _extract_verifiable_claims(html: str) -> list[str]:
 
 
 def _build_verification_docs(gathered: GatheredData, source_max_chars: int) -> list[dict]:
-    """Build compact document blocks for fact verification."""
+    """
+    Build compact document blocks for fact verification.
+
+    Includes both scraped page content and discovered article snippets so that
+    claims sourced from web-search discovery (Waves 2–6, Tavily, etc.) are not
+    incorrectly marked UNVERIFIED just because they never appeared in a scraped page.
+    """
     docs = []
-    for source in gathered.scraped_sources[:30]:  # match Pass 2 source limit
+
+    # Scraped full-page content (up to 30, matching Pass 2 source limit)
+    for source in gathered.scraped_sources[:30]:
         if source.error or not source.content:
             continue
-        content = source.content[:source_max_chars]  # full length for accurate verification
         docs.append({
             "type": "document",
             "source": {
                 "type": "text",
                 "media_type": "text/plain",
-                "data": content,
+                "data": source.content[:source_max_chars],
             },
             "title": source.title[:100] if source.title else "Source",
             "citations": {"enabled": True},
         })
+
+    # Discovered article snippets — include those not already covered by a scraped source
+    scraped_urls = {s.url for s in gathered.scraped_sources if not s.error}
+    for article in gathered.discovered_articles:
+        if article.url in scraped_urls or not article.snippet:
+            continue
+        docs.append({
+            "type": "document",
+            "source": {
+                "type": "text",
+                "media_type": "text/plain",
+                "data": article.snippet[:source_max_chars],
+            },
+            "title": (article.title or article.url)[:100],
+            "citations": {"enabled": True},
+        })
+
     return docs
 
 

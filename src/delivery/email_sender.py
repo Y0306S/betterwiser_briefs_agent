@@ -53,14 +53,6 @@ async def send_briefing(
     # Step 1: Always archive locally first
     output_path = archive_locally(validated, run_context.run_id, run_context.runs_dir)
 
-    # Try SharePoint upload in background (non-blocking failure)
-    try:
-        month = run_context.month
-        track_name = _track_name(track)
-        await upload_to_sharepoint(output_path, track_name, month)
-    except Exception:
-        pass  # SharePoint is optional — never block delivery
-
     # Step 2: Check if we should actually send email
     if run_context.dry_run or not run_context.send:
         logger.info(
@@ -77,7 +69,34 @@ async def send_briefing(
             held_for_review=validated.held_for_review,
         )
 
-    # Step 3: Check Azure credentials
+    # Try SharePoint upload only when actually sending (non-blocking failure)
+    try:
+        month = run_context.month
+        track_name = _track_name(track)
+        await upload_to_sharepoint(output_path, track_name, month)
+    except Exception:
+        pass  # SharePoint is optional — never block delivery
+
+    # Step 3: Check if held for review (before credentials — grounding failure is
+    # the real reason we can't send, not missing Azure keys)
+    if validated.held_for_review:
+        logger.warning(
+            f"Track {track.value}: Briefing HELD FOR REVIEW "
+            f"(grounding below threshold). NOT sending. "
+            f"Review at {output_path}."
+        )
+        return DeliveryReceipt(
+            run_id=run_context.run_id,
+            track=track,
+            delivered=False,
+            dry_run=False,
+            output_path=output_path,
+            recipients=recipient_emails,
+            held_for_review=True,
+            error="Held for human review: grounding below threshold",
+        )
+
+    # Step 4: Check Azure credentials
     required = ["AZURE_TENANT_ID", "AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET", "AZURE_USER_EMAIL"]
     missing = [v for v in required if not os.getenv(v)]
     if missing:
@@ -94,24 +113,6 @@ async def send_briefing(
             output_path=output_path,
             recipients=recipient_emails,
             error=f"Missing Azure credentials: {', '.join(missing)}",
-        )
-
-    # Step 4: Check if held for review
-    if validated.held_for_review:
-        logger.warning(
-            f"Track {track.value}: Briefing HELD FOR REVIEW "
-            f"(grounding below threshold). NOT sending. "
-            f"Review at {output_path}."
-        )
-        return DeliveryReceipt(
-            run_id=run_context.run_id,
-            track=track,
-            delivered=False,
-            dry_run=False,
-            output_path=output_path,
-            recipients=recipient_emails,
-            held_for_review=True,
-            error="Held for human review: grounding below threshold",
         )
 
     # Step 5: Send via MS Graph

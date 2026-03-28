@@ -67,8 +67,9 @@ def _parse_pdf(filename: str, content: bytes) -> AttachmentContent:
         import fitz  # PyMuPDF
 
         doc = fitz.open(stream=content, filetype="pdf")
+        total_pages = len(doc)  # cache before close
         pages_text: list[str] = []
-        for page_num in range(len(doc)):
+        for page_num in range(total_pages):
             page = doc.load_page(page_num)
             text = page.get_text("text")
             if text.strip():
@@ -82,7 +83,7 @@ def _parse_pdf(filename: str, content: bytes) -> AttachmentContent:
                 filename=filename,
                 content_type="application/pdf",
                 extracted_text="[PDF contains no extractable text — may be image-based]",
-                page_count=len(pages_text),
+                page_count=total_pages,
                 extraction_method="pymupdf",
             )
 
@@ -90,7 +91,7 @@ def _parse_pdf(filename: str, content: bytes) -> AttachmentContent:
             filename=filename,
             content_type="application/pdf",
             extracted_text=full_text,
-            page_count=doc.page_count if hasattr(doc, "page_count") else len(pages_text),
+            page_count=total_pages,
             extraction_method="pymupdf",
         )
 

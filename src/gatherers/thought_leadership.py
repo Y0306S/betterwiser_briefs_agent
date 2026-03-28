@@ -16,6 +16,7 @@ Cost is NOT a constraint — exhaust all waves.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
@@ -363,8 +364,7 @@ async def _wave3_firm_pages(
                 except Exception as e:
                     if attempt == 0:
                         logger.debug(f"Wave 3 fetch failed for {firm_name} ({insights_url}), retrying: {e}")
-                        import asyncio as _asyncio
-                        await _asyncio.sleep(1.0)
+                        await asyncio.sleep(1.0)
                     else:
                         logger.debug(f"Wave 3 firm page fetch failed for {firm_name} ({insights_url}): {e}")
                     continue
@@ -385,7 +385,6 @@ async def _wave4_tavily(month: str, tavily_api_key: str) -> list[DiscoveredArtic
     ]
 
     try:
-        import asyncio
         from tavily import TavilyClient
         tavily = TavilyClient(api_key=tavily_api_key)
 
