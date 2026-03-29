@@ -33,3 +33,9 @@ QUALITY STANDARDS:
 - Every update must be traceable to a source document
 - Dates and publication details must be accurate
 - Do not include updates you cannot verify from the sources provided
+
+CITATION ENFORCEMENT (mandatory — entries without a source URL will be rejected):
+- Every entry MUST include the source URL on its own line in parentheses: ([URL])
+- The URL must be copied exactly from the source documents provided — do not reconstruct or guess it
+- If you cannot find a URL for a claimed development, omit the entry entirely
+- Do not reuse one URL across multiple distinct entries

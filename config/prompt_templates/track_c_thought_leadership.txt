@@ -38,3 +38,9 @@ EDITORIAL STANDARDS:
 - The BetterWiser Relevance note must be specific and actionable, not generic
 - If the sources are thin on a theme, consolidate rather than padding
 - Every article cited must come from the source documents provided
+
+CITATION ENFORCEMENT (mandatory — entries without a source URL will be rejected):
+- Every item description MUST end with the article URL in parentheses: ([URL])
+- The URL must be copied exactly from the source document — do not reconstruct, shorten, or guess it
+- If you cannot find a URL for an article, omit the entire item rather than publishing it uncited
+- The Opinion Takeaway and BetterWiser Relevance notes do not need their own URLs — only the item description line does

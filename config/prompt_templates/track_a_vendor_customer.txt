@@ -27,3 +27,9 @@ QUALITY STANDARDS:
 - Dates must be specific (day, month, year) — do not use vague ranges
 - URLs must be actual URLs from the source documents, not fabricated
 - If information for a segment is unavailable in the sources, state "No significant updates found for this period" rather than fabricating content
+
+CITATION ENFORCEMENT (mandatory — entries without a source URL will be rejected):
+- Every bullet entry MUST end with the source URL in parentheses: ([URL])
+- The URL must be copied exactly from the source documents provided — do not shorten, paraphrase, or reconstruct it
+- If you cannot find a URL for a claim, omit the entire entry rather than publishing it without a citation
+- Do not use the same URL for multiple unrelated claims unless the source genuinely covers all of them

@@ -33,8 +33,6 @@ logger = logging.getLogger(__name__)
 # Email brand colours
 BW_NAVY = "#1B2A4A"
 BW_TEAL = "#00B4C8"
-BW_LIGHT_GREY = "#F7F8FA"
-BW_DARK_GREY = "#4A4A4A"
 
 
 async def format_and_validate(
@@ -62,11 +60,23 @@ async def format_and_validate(
     logger.info(f"Track {track.value}: Pass 4 — validating {len(urls_in_html)} links")
     link_results = await _validate_links(urls_in_html)
 
+    # Check that every briefing entry carries at least one citation URL.
+    # Entries without citations are logged as warnings and annotated in the HTML
+    # so reviewers can spot and fix them before the briefing is sent.
+    html_with_citations, uncited_count = _enforce_citation_coverage(synthesis.raw_html, urls_in_html)
+    if uncited_count:
+        logger.warning(
+            f"Track {track.value}: {uncited_count} entry/entries appear to have no "
+            f"source URL attached — annotated in HTML for review"
+        )
+    else:
+        logger.info(f"Track {track.value}: citation coverage check passed")
+
     # Build map of dead URL → Wayback fallback
     url_replacements = _build_url_replacements(link_results)
 
     # Apply URL replacements to the HTML
-    html_with_valid_links = _replace_dead_links(synthesis.raw_html, url_replacements)
+    html_with_valid_links = _replace_dead_links(html_with_citations, url_replacements)
 
     # Wrap in BetterWiser email template
     month_human = _month_human(month)
@@ -82,6 +92,7 @@ async def format_and_validate(
         track=track,
         month_human=month_human,
         track_name=track_name,
+        source_count=len(urls_in_html),
     )
 
     held_for_review = grounding_report.below_threshold
@@ -210,23 +221,21 @@ def _wrap_in_email_template(
     track: BriefingTrack,
     month_human: str,
     track_name: str,
+    source_count: int = 0,
 ) -> str:
     """
     Wrap the briefing content in a BetterWiser-branded Outlook-compatible HTML template.
 
+    Style: Structured Executive Brief (Option A) — consulting/McKinsey report format.
     Uses table-based layout for Outlook compatibility. All CSS is inline.
     """
-    track_badge_colour = {
-        BriefingTrack.A: "#E8F4F8",
-        BriefingTrack.B: "#F0F8E8",
-        BriefingTrack.C: "#FFF4E8",
-    }.get(track, BW_LIGHT_GREY)
-
     track_accent = {
         BriefingTrack.A: "#0078A8",
         BriefingTrack.B: "#4A8A28",
         BriefingTrack.C: "#C87800",
-    }.get(track, BW_TEAL)
+    }.get(track, "#C87800")
+
+    source_note = f"{source_count} sources cited" if source_count else "sources cited"
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -235,85 +244,72 @@ def _wrap_in_email_template(
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>BetterWiser Legal Intelligence — {track_name} — {month_human}</title>
 </head>
-<body style="margin:0;padding:0;background-color:#F0F0F0;font-family:Calibri,Arial,sans-serif;">
+<body style="margin:0;padding:0;background-color:#ECECEC;font-family:Calibri,Arial,sans-serif;">
 
-<!-- Outer wrapper -->
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#F0F0F0;">
-<tr><td align="center" style="padding:20px 10px;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#ECECEC;">
+<tr><td align="center" style="padding:24px 12px;">
 
-<!-- Email container -->
 <table width="680" cellpadding="0" cellspacing="0" border="0"
-       style="background-color:#FFFFFF;border-radius:4px;overflow:hidden;
-              box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+       style="background-color:#FFFFFF;border-radius:4px;">
 
-<!-- Header -->
-<tr>
-  <td style="background-color:{BW_NAVY};padding:24px 32px;">
-    <table width="100%" cellpadding="0" cellspacing="0" border="0">
-    <tr>
-      <td>
-        <p style="margin:0;font-size:22px;font-weight:bold;color:#FFFFFF;
-                  font-family:Calibri,Arial,sans-serif;letter-spacing:0.5px;">
-          BetterWiser
-        </p>
-        <p style="margin:4px 0 0 0;font-size:12px;color:{BW_TEAL};
-                  font-family:Calibri,Arial,sans-serif;letter-spacing:1px;text-transform:uppercase;">
-          Legal Intelligence
-        </p>
-      </td>
-      <td align="right" style="vertical-align:middle;">
-        <span style="background-color:{track_accent};color:#FFFFFF;padding:4px 12px;
-                     border-radius:3px;font-size:11px;font-weight:bold;
-                     font-family:Calibri,Arial,sans-serif;letter-spacing:0.5px;">
-          TRACK {track.value}
-        </span>
-      </td>
-    </tr>
-    </table>
-  </td>
-</tr>
+  <!-- Header band -->
+  <tr>
+    <td style="background-color:{BW_NAVY};padding:28px 36px;">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+        <td>
+          <p style="margin:0;font-size:24px;font-weight:bold;color:#FFFFFF;
+                    font-family:Calibri,Arial,sans-serif;letter-spacing:0.5px;">BetterWiser</p>
+          <p style="margin:5px 0 0 0;font-size:11px;color:{BW_TEAL};letter-spacing:2px;
+                    text-transform:uppercase;font-family:Calibri,Arial,sans-serif;">Legal Intelligence</p>
+        </td>
+        <td align="right" style="vertical-align:top;">
+          <p style="margin:0;font-size:12px;color:#A0B0C8;font-family:Calibri,Arial,sans-serif;">
+            Track {track.value} — {track_name}
+          </p>
+          <p style="margin:4px 0 0 0;font-size:12px;color:#A0B0C8;font-family:Calibri,Arial,sans-serif;">
+            {month_human} Edition
+          </p>
+        </td>
+      </tr></table>
+    </td>
+  </tr>
 
-<!-- Title bar -->
-<tr>
-  <td style="background-color:{track_badge_colour};padding:16px 32px;
-             border-bottom:2px solid {track_accent};">
-    <p style="margin:0;font-size:16px;font-weight:bold;color:{BW_NAVY};
-              font-family:Calibri,Arial,sans-serif;">
-      {track_name}
-    </p>
-    <p style="margin:4px 0 0 0;font-size:13px;color:{BW_DARK_GREY};
-              font-family:Calibri,Arial,sans-serif;">
-      {month_human} Edition
-    </p>
-  </td>
-</tr>
+  <!-- Accent bar -->
+  <tr>
+    <td style="background-color:{track_accent};height:3px;font-size:1px;line-height:1px;">&nbsp;</td>
+  </tr>
 
-<!-- Content -->
-<tr>
-  <td style="padding:24px 32px;color:{BW_DARK_GREY};font-family:Calibri,Arial,sans-serif;
-             font-size:14px;line-height:1.6;">
-    {_normalise_content_html(content_html)}
-  </td>
-</tr>
+  <!-- Summary bar -->
+  <tr>
+    <td style="background-color:#FFF9F0;padding:16px 36px;border-bottom:1px solid #E8E0D0;">
+      <p style="margin:0;font-size:13px;color:#5A4A28;font-family:Calibri,Arial,sans-serif;line-height:1.5;">
+        <strong>This month:</strong> Track {track.value} — {track_name}
+        &nbsp;·&nbsp; {month_human} &nbsp;·&nbsp; {source_note}
+      </p>
+    </td>
+  </tr>
 
-<!-- Footer -->
-<tr>
-  <td style="background-color:{BW_NAVY};padding:16px 32px;border-top:1px solid {BW_TEAL};">
-    <p style="margin:0;font-size:11px;color:#A0A8B8;font-family:Calibri,Arial,sans-serif;
-              line-height:1.5;">
-      This briefing is generated by the BetterWiser AI Briefing Agent for internal use.
-      Produced automatically — verify key facts before external use.
-      <br>BetterWiser Pte. Ltd. · Singapore
-    </p>
-  </td>
-</tr>
+  <!-- Body -->
+  <tr>
+    <td style="padding:28px 36px;">
+      {_normalise_content_html(content_html)}
+    </td>
+  </tr>
+
+  <!-- Footer -->
+  <tr>
+    <td style="background-color:{BW_NAVY};padding:16px 36px;border-top:2px solid {BW_TEAL};">
+      <p style="margin:0;font-size:11px;color:#7A8AA0;font-family:Calibri,Arial,sans-serif;line-height:1.5;">
+        BetterWiser Legal Intelligence &nbsp;·&nbsp; {month_human} &nbsp;·&nbsp;
+        Generated automatically — verify before external use.
+        &nbsp;·&nbsp; BetterWiser Pte. Ltd., Singapore
+      </p>
+    </td>
+  </tr>
 
 </table>
-<!-- /Email container -->
-
 </td></tr>
 </table>
-<!-- /Outer wrapper -->
 
 </body>
 </html>"""
@@ -322,55 +318,142 @@ def _wrap_in_email_template(
 def _normalise_content_html(html: str) -> str:
     """
     Apply inline styles to common HTML elements for Outlook compatibility.
-    Converts CSS classes/tag defaults to inline styles.
+
+    Styled to match the Structured Executive Brief (Option A) format:
+    - Theme headings (h2) with orange bottom border
+    - Briefing items (li) with orange left-border accent, no bullets
+    - Citation links (a) in orange
+    - Superscript citation numbers in orange
+    - Opinion/Relevance labels (strong) in navy
     """
-    # Apply inline styles — skip elements that already carry a style attribute
+    # Skip elements that already carry a style attribute
     html = re.sub(
         r"<h1(?![^>]*\bstyle=)([^>]*)>",
-        r'<h1\1 style="font-size:20px;font-weight:bold;color:#1B2A4A;margin:24px 0 8px 0;">',
+        r'<h1\1 style="font-size:20px;font-weight:bold;color:#1B2A4A;'
+        r'font-family:Calibri,Arial,sans-serif;margin:24px 0 12px 0;">',
         html, flags=re.IGNORECASE
     )
+    # Theme heading — orange underline, matches Option A section dividers
     html = re.sub(
         r"<h2(?![^>]*\bstyle=)([^>]*)>",
-        r'<h2\1 style="font-size:17px;font-weight:bold;color:#1B2A4A;margin:20px 0 8px 0;'
-        r'padding-bottom:4px;border-bottom:1px solid #E0E0E0;">',
+        r'<h2\1 style="font-size:17px;font-weight:bold;color:#1B2A4A;'
+        r'font-family:Calibri,Arial,sans-serif;margin:0 0 16px 0;'
+        r'padding-bottom:8px;border-bottom:2px solid #C87800;">',
         html, flags=re.IGNORECASE
     )
+    # Sub-label (e.g. "Theme 01" eyebrow) — uppercase orange
     html = re.sub(
         r"<h3(?![^>]*\bstyle=)([^>]*)>",
-        r'<h3\1 style="font-size:15px;font-weight:bold;color:#0078A8;margin:16px 0 6px 0;">',
+        r'<h3\1 style="font-size:11px;font-weight:bold;color:#C87800;'
+        r'font-family:Calibri,Arial,sans-serif;letter-spacing:2px;'
+        r'text-transform:uppercase;margin:24px 0 4px 0;">',
         html, flags=re.IGNORECASE
     )
     html = re.sub(
         r"<p(?![^>]*\bstyle=)([^>]*)>",
-        r'<p\1 style="margin:0 0 10px 0;line-height:1.6;color:#4A4A4A;font-size:14px;">',
+        r'<p\1 style="margin:0 0 8px 0;line-height:1.6;color:#4A4A4A;'
+        r'font-size:13px;font-family:Calibri,Arial,sans-serif;">',
         html, flags=re.IGNORECASE
     )
+    # Remove bullets from lists; items carry their own left-border accent
     html = re.sub(
         r"<ul(?![^>]*\bstyle=)([^>]*)>",
-        r'<ul\1 style="margin:0 0 12px 0;padding-left:20px;">',
+        r'<ul\1 style="margin:0 0 20px 0;padding:0;list-style:none;">',
         html, flags=re.IGNORECASE
     )
+    # Each briefing item: orange left-border accent (Option A style)
     html = re.sub(
         r"<li(?![^>]*\bstyle=)([^>]*)>",
-        r'<li\1 style="margin-bottom:8px;line-height:1.6;color:#4A4A4A;font-size:14px;">',
+        r'<li\1 style="margin-bottom:20px;padding:0 0 0 16px;'
+        r'border-left:3px solid #C87800;list-style:none;'
+        r'font-size:13px;line-height:1.6;color:#4A4A4A;'
+        r'font-family:Calibri,Arial,sans-serif;">',
         html, flags=re.IGNORECASE
     )
+    # Citation and source links — orange, small, no underline (matches Option A [1] links)
     html = re.sub(
         r"<a ([^>]*href=[^>]+)>",
-        lambda m: f'<a {m.group(1)} style="color:#0078A8;text-decoration:none;">' if 'style=' not in m.group(1) else f'<a {m.group(1)}>',
+        lambda m: (
+            f'<a {m.group(1)} style="color:#C87800;text-decoration:none;font-size:11px;">'
+            if 'style=' not in m.group(1) else f'<a {m.group(1)}>'
+        ),
         html, flags=re.IGNORECASE
     )
+    # Bold labels ("Opinion Takeaway:", "Relevance to BetterWiser:") — navy
     html = re.sub(
         r"<strong(?![^>]*\bstyle=)([^>]*)>",
-        r'<strong\1 style="font-weight:bold;color:#1B2A4A;">',
+        r'<strong\1 style="font-weight:bold;color:#1B2A4A;font-family:Calibri,Arial,sans-serif;">',
         html, flags=re.IGNORECASE
     )
-    # Strip div tags (not convert to p) to avoid creating invalid nested <p> elements
+    # Superscript citation numbers — orange, bold (matches Option A [1] superscripts)
+    html = re.sub(
+        r"<sup(?![^>]*\bstyle=)([^>]*)>",
+        r'<sup\1 style="font-size:10px;color:#C87800;font-weight:bold;vertical-align:super;">',
+        html, flags=re.IGNORECASE
+    )
+    # Italic text (Opinion Takeaway body, em tags)
+    html = re.sub(
+        r"<em(?![^>]*\bstyle=)([^>]*)>",
+        r'<em\1 style="font-style:italic;color:#666666;font-family:Calibri,Arial,sans-serif;">',
+        html, flags=re.IGNORECASE
+    )
+    # Strip div tags to avoid invalid nesting
     html = re.sub(r"<div[^>]*>", "", html, flags=re.IGNORECASE)
     html = re.sub(r"</div>", "", html, flags=re.IGNORECASE)
 
     return html
+
+
+def _enforce_citation_coverage(html: str, cited_urls: list[str]) -> tuple[str, int]:
+    """
+    Scan each briefing entry block and flag any that contain no hyperlink.
+
+    An "entry" is identified as a <li> or <p> that contains a bold heading
+    (i.e. the formatted output of a briefing item).  Each entry is expected to
+    carry at least one <a href="..."> pointing to the source.
+
+    Any entry found without a URL gets an inline warning annotation appended so
+    that the human reviewer can see exactly which items are uncited before the
+    briefing leaves the system.
+
+    Returns:
+        (annotated_html, count_of_uncited_entries)
+    """
+    # Match each <li>...</li> or standalone <p> that opens with a bold element
+    # — these are the patterns that Pass 2 produces for briefing items.
+    entry_pattern = re.compile(
+        r"(<(?:li|p)[^>]*>)((?:(?!</(?:li|p)>).)*?)(</(?:li|p)>)",
+        re.DOTALL | re.IGNORECASE,
+    )
+    url_pattern = re.compile(r'href=["\']https?://', re.IGNORECASE)
+    # A block qualifies as a "briefing entry" if it contains a bold tag and
+    # is long enough to be substantive (avoids flagging short structural <p>s).
+    bold_pattern = re.compile(r"<(?:strong|b)[^>]*>", re.IGNORECASE)
+
+    uncited = 0
+
+    def annotate_if_uncited(m: re.Match) -> str:
+        nonlocal uncited
+        open_tag, body, close_tag = m.group(1), m.group(2), m.group(3)
+        text_only = re.sub(r"<[^>]+>", "", body).strip()
+        if len(text_only) < 60:
+            return m.group(0)  # too short to be a real entry
+        if not bold_pattern.search(body):
+            return m.group(0)  # no bold heading — not a briefing item
+        if url_pattern.search(body):
+            return m.group(0)  # already has a citation link
+        # No URL found — annotate
+        uncited += 1
+        warning = (
+            '<span style="background-color:#FFF3CD;color:#856404;font-size:11px;'
+            'padding:2px 6px;border-radius:3px;margin-left:8px;">'
+            '&#9888; NO SOURCE CITED'
+            '</span>'
+        )
+        return f"{open_tag}{body} {warning}{close_tag}"
+
+    annotated = entry_pattern.sub(annotate_if_uncited, html)
+    return annotated, uncited
 
 
 def _month_human(month: str) -> str:
