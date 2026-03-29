@@ -17,7 +17,19 @@ Every month, this agent scans the legal AI landscape and delivers three polished
 
 ---
 
-## Three Ways to Run It
+## Ways to Run It
+
+### Option 0 — Demo / Smoke Test (Start here after setup)
+Runs the **full pipeline with synthetic data** to verify all code paths work before spending real API credits on a production run. Uses Claude Haiku instead of Opus, injects pre-built demo sources, and skips real web scraping. Sends a `[DEMO]` email if Azure credentials are present.
+
+```bash
+python demo_run.py              # all 3 tracks, saves HTML only (~$0.05)
+python demo_run.py --track C    # single track, fastest
+python demo_run.py --send-email # also sends demo email via MS Graph
+```
+Or double-click `RUN_DEMO.bat`.
+
+What it verifies: Pydantic schema construction · Pass 0–4 synthesis pipeline · HTML formatting · link validation · delivery / archiving · email send path
 
 ### Option 1 — Web Dashboard (Recommended for team use)
 A browser-based UI. No command line needed. Anyone on the team can trigger a run, watch live progress, and open the finished briefings.
@@ -328,10 +340,16 @@ Each article gets: Summary · Opinion Takeaway · BetterWiser Relevance
 ```
 betterwiser_briefs_agent/
 │
+├── demo_run.py                    ← Smoke test / demo run (start here after setup)
+├── RUN_DEMO.bat                   ← Double-click to run demo (all 3 tracks, ~$0.05)
+├── RUN_BRIEFING_DRY_RUN.bat       ← Double-click for a full dry-run (save HTML)
+├── RUN_BRIEFING_SEND_EMAIL.bat    ← Double-click to generate + send real email
+│
 ├── dashboard.py                   ← Web dashboard (python dashboard.py)
-├── templates/                     ← Dashboard HTML templates
+├── templates/                     ← Dashboard + email preview HTML templates
 │   ├── dashboard.html
-│   └── run_detail.html
+│   ├── run_detail.html
+│   └── email_preview_option_A.html ← Production email format reference
 │
 ├── .github/workflows/
 │   └── monthly_briefing.yml       ← GitHub Actions auto-scheduler
@@ -398,3 +416,5 @@ Layer 3: HELD FOR REVIEW   Below 95% → saved to disk, NOT emailed,
 | Microsoft Graph | Free |
 | GitHub Actions | Free (private repo) |
 | **Total** | **~$17–24 / month** |
+
+**Demo run cost:** under $0.10 total for all 3 tracks (Claude Haiku, no extended thinking, synthetic data only).

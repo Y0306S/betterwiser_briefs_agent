@@ -69,19 +69,48 @@ TAVILY_API_KEY=
 
 ---
 
-## Step 4: Test Without Azure (Works Immediately)
+## Step 4: Run the Demo (Recommended First Test)
 
-With only `ANTHROPIC_API_KEY` set, the agent gathers from the web only (no inbox):
+With only `ANTHROPIC_API_KEY` set, run the demo script to verify the full pipeline works before spending real API credits:
 
 ```bash
-# Generate Track C (Thought Leadership) for current month — dry run
-python -m src.orchestrator --track C --dry-run
+conda activate bw-briefing
+cd c:\Users\chuan\betterwiser_briefs_agent
+python demo_run.py
+```
 
-# Generate all tracks
-python -m src.orchestrator --dry-run
+Or double-click `RUN_DEMO.bat`.
 
-# Specify a month
+The demo script runs the **complete synthesis pipeline** (all 6 passes, all 3 tracks) using pre-built synthetic data — no real web scraping, no inbox reading, no Tavily. It uses Claude Haiku instead of Opus to keep costs under $0.10 total.
+
+**Expected output:**
+```
+Track A  [PASS]
+  ✓ Phase 2 (demo data)
+  ✓ Pass 0 (clusters=3)
+  ✓ Pass 1 (sorted clusters=3)
+  ✓ Pass 2 (output=1247 chars)
+  ✓ Pass 3
+  ✓ Pass 3.5 (grounding=100%)
+  ✓ Pass 4 (dead_links=3)   ← expected: demo URLs aren't real
+  ✓ Phase 5 — saved to runs/2026-03_DEMO_.../delivery/track_A.html
+...
+All systems operational. Pipeline is working correctly.
+```
+
+To also send a `[DEMO]` email (requires Azure credentials configured):
+```bash
+python demo_run.py --send-email
+```
+
+Once the demo passes, run the real pipeline:
+
+```bash
+# Full dry run (real web scraping + real Claude Opus synthesis)
 python -m src.orchestrator --month 2026-03 --dry-run
+
+# Send emails
+python -m src.orchestrator --month 2026-03 --send
 ```
 
 Briefings are saved to: `runs/{run_id}/delivery/track_A.html` etc.
@@ -183,6 +212,9 @@ See `.github/workflows/monthly_briefing.yml` (create this file if needed).
 | Issue | Solution |
 |-------|----------|
 | `ANTHROPIC_API_KEY not set` | Add to `.env` file and retry |
+| Demo run `FAIL Pass 2` | Check `ANTHROPIC_API_KEY` is valid and has credit |
+| Demo run dead links (3 per track) | Expected — demo uses placeholder URLs, link validator marks them dead |
+| Demo shows `[PASS]` but email not sent | Normal if `--send-email` not passed, or Azure creds missing |
 | `Azure AD credentials incomplete` | Inbox + email disabled; briefings still generate to disk |
 | `All scrapers failed for URL` | Check if URL is accessible; some sites block bots |
 | `Grounding below threshold` | Briefing saved to disk but NOT sent; review at `runs/.../delivery/` |
@@ -196,6 +228,10 @@ See `.github/workflows/monthly_briefing.yml` (create this file if needed).
 
 ```
 betterwiser_briefs_agent/
+├── demo_run.py                       ← Smoke test (run this first after setup)
+├── RUN_DEMO.bat                      ← Double-click demo launcher
+├── RUN_BRIEFING_DRY_RUN.bat          ← Double-click dry-run launcher
+├── RUN_BRIEFING_SEND_EMAIL.bat       ← Double-click send-email launcher
 ├── config/
 │   ├── briefing_config.yaml          ← Master config (edit recipients here)
 │   ├── betterwiser_context.txt       ← Company context for Track C

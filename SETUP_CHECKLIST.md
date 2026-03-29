@@ -7,7 +7,12 @@ Everything you need, in order, from zero to a running agent.
 ## What You Actually Need
 
 ```
-MINIMUM — generate briefings saved to disk:
+MINIMUM — verify pipeline works (demo run):
+  ✅ Python 3.12 environment
+  ✅ Anthropic API key  (~$0.10 for demo, ~$17–24/month for real runs)
+  → Run: python demo_run.py
+
+MINIMUM — generate real briefings saved to disk:
   ✅ Python 3.12 environment
   ✅ Anthropic API key  (~$17–24/month in API costs)
 
@@ -102,9 +107,43 @@ ANTHROPIC_API_KEY=sk-ant-your-key-here
 
 ## PART 3 — First Test Run
 
-At this point you can already generate briefings. They'll be saved as HTML files.
+At this point you can already run the pipeline. Start with the demo script — it verifies all code paths work in under 4 minutes for under $0.10.
 
-**Option A — Web Dashboard (easiest):**
+**Option A — Demo run (recommended first step):**
+```bash
+conda activate bw-briefing
+cd c:\Users\chuan\betterwiser_briefs_agent
+python demo_run.py
+```
+Or double-click `RUN_DEMO.bat`.
+
+The demo runs the full 6-pass synthesis pipeline on all 3 tracks using pre-built synthetic data. No real web scraping. No inbox access needed. No Tavily needed.
+
+**Expected output — all tracks should show `[PASS]`:**
+```
+Track A  [PASS]
+  ✓ Phase 2 (demo data)
+  ✓ Pass 0 (clusters=3)
+  ✓ Pass 1 (sorted clusters=3)
+  ✓ Pass 2 (output=~1200 chars)
+  ✓ Pass 3
+  ✓ Pass 3.5 (grounding=100%)
+  ✓ Pass 4 (dead_links=3)     ← expected, demo URLs are placeholders
+  ✓ Phase 5 — saved to runs\...
+
+All systems operational. Pipeline is working correctly.
+```
+
+If any track shows `[FAIL]`, check the error message — it's almost always a missing `ANTHROPIC_API_KEY`.
+
+**Option B — Single track real dry run:**
+```bash
+conda activate bw-briefing
+cd c:\Users\chuan\betterwiser_briefs_agent
+python -m src.orchestrator --month 2026-03 --track C --dry-run
+```
+
+**Option C — Web Dashboard (easiest for non-developers):**
 ```bash
 conda activate bw-briefing
 cd c:\Users\chuan\betterwiser_briefs_agent
@@ -112,17 +151,10 @@ python dashboard.py
 ```
 Open http://localhost:5000 in your browser, pick March 2026, click **Generate Briefing**.
 
-**Option B — Command line:**
-```bash
-conda activate bw-briefing
-cd c:\Users\chuan\betterwiser_briefs_agent
-python -m src.orchestrator --month 2026-03 --track C --dry-run
-```
-
 **Where to find output:** `runs\2026-03_run_[timestamp]\delivery\track_C.html`
 Open the HTML file in Chrome or Edge.
 
-If you can see a formatted briefing, the agent is working. Continue below to add email.
+If the demo passes and you can open the HTML briefing, the agent is working. Continue below to add email.
 
 ---
 
@@ -356,7 +388,8 @@ The dashboard already listens on `0.0.0.0:5000`, so anyone on the same WiFi can 
 - [ ] `.env` created from `.env.example`
 - [ ] `ANTHROPIC_API_KEY` set in `.env`
 - [ ] Anthropic billing configured with $50 cap
-- [ ] Test run completed: `python dashboard.py` → generate Track C → HTML file opens in browser
+- [ ] **Demo run passes:** `python demo_run.py` → all 3 tracks show `[PASS]`
+- [ ] Demo HTML opens in browser (`runs\..._DEMO_...\delivery\track_A.html`)
 
 ### Full Email Setup
 - [ ] M365 shared mailbox `ai-briefing@betterwiser.com` created
@@ -383,8 +416,12 @@ The dashboard already listens on `0.0.0.0:5000`, so anyone on the same WiFi can 
 | VS Code shows package warnings | Press `Ctrl+Shift+P` → Python: Select Interpreter → choose `bw-briefing` conda env |
 | `ANTHROPIC_API_KEY not set` | Check `.env` exists and has the key |
 | `ModuleNotFoundError` | Run `pip install -r requirements.txt` inside the `bw-briefing` conda env |
+| Demo shows `[FAIL] Pass 2` | `ANTHROPIC_API_KEY` is invalid or has no credit — check Anthropic Console billing |
+| Demo shows 3 dead links per track | Expected — demo uses placeholder URLs; the link validator marks them dead correctly |
+| Demo passes but no email sent | Normal without `--send-email` flag, or Azure credentials not yet configured |
 | Dashboard shows "Azure AD not configured" | Inbox/email disabled — briefings still save to disk |
 | Track shown as ⚠ (held for review) | Grounding below 95% — open the HTML to review manually |
 | Playwright error | Run `python -m playwright install chromium --with-deps` |
-| Run takes 30+ min | Normal for Track C (6-wave deep research). A+B take ~10 min |
+| Demo run takes > 5 min | Check for API rate limiting — Haiku calls should complete quickly |
+| Full run takes 30+ min | Normal for Track C (6-wave deep research). A+B take ~10 min |
 | GitHub Actions run fails | Check the run logs in the Actions tab; most issues are missing secrets |
