@@ -235,7 +235,25 @@ def _wrap_in_email_template(
         BriefingTrack.C: "#C87800",
     }.get(track, "#C87800")
 
-    source_note = f"{source_count} sources cited" if source_count else "sources cited"
+    # Singular/plural and zero-source fallback
+    if source_count > 1:
+        source_note = f"{source_count} sources cited"
+    elif source_count == 1:
+        source_note = "1 source cited"
+    else:
+        source_note = "generated from web sources"
+
+    # Graceful fallback when synthesis produced nothing
+    if content_html.strip():
+        body_content = _normalise_content_html(content_html)
+    else:
+        body_content = (
+            '<p style="margin:0;color:#888888;font-style:italic;'
+            'font-family:Calibri,Arial,sans-serif;font-size:13px;">'
+            'No briefing content was generated for this track. '
+            'Please check the run logs and retry.'
+            '</p>'
+        )
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -249,25 +267,32 @@ def _wrap_in_email_template(
 <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#ECECEC;">
 <tr><td align="center" style="padding:24px 12px;">
 
+<!-- max-width for browsers; width attribute for Outlook -->
 <table width="680" cellpadding="0" cellspacing="0" border="0"
-       style="background-color:#FFFFFF;border-radius:4px;">
+       style="width:100%;max-width:680px;background-color:#FFFFFF;">
 
   <!-- Header band -->
   <tr>
     <td style="background-color:{BW_NAVY};padding:28px 36px;">
+      <!-- Fixed right-column width prevents long track names from crowding the logo -->
       <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-        <td>
+        <td style="vertical-align:top;">
           <p style="margin:0;font-size:24px;font-weight:bold;color:#FFFFFF;
                     font-family:Calibri,Arial,sans-serif;letter-spacing:0.5px;">BetterWiser</p>
           <p style="margin:5px 0 0 0;font-size:11px;color:{BW_TEAL};letter-spacing:2px;
                     text-transform:uppercase;font-family:Calibri,Arial,sans-serif;">Legal Intelligence</p>
         </td>
-        <td align="right" style="vertical-align:top;">
-          <p style="margin:0;font-size:12px;color:#A0B0C8;font-family:Calibri,Arial,sans-serif;">
-            Track {track.value} — {track_name}
+        <td width="230" align="right" style="vertical-align:top;padding-left:16px;">
+          <p style="margin:0;font-size:12px;color:#A0B0C8;font-family:Calibri,Arial,sans-serif;
+                    white-space:nowrap;overflow:hidden;">
+            Track {track.value}
           </p>
-          <p style="margin:4px 0 0 0;font-size:12px;color:#A0B0C8;font-family:Calibri,Arial,sans-serif;">
-            {month_human} Edition
+          <p style="margin:4px 0 0 0;font-size:12px;color:#A0B0C8;font-family:Calibri,Arial,sans-serif;
+                    word-break:break-word;">
+            {track_name}
+          </p>
+          <p style="margin:4px 0 0 0;font-size:11px;color:#7A8AA0;font-family:Calibri,Arial,sans-serif;">
+            {month_human}
           </p>
         </td>
       </tr></table>
@@ -279,20 +304,19 @@ def _wrap_in_email_template(
     <td style="background-color:{track_accent};height:3px;font-size:1px;line-height:1px;">&nbsp;</td>
   </tr>
 
-  <!-- Summary bar -->
+  <!-- Summary bar — month + source count only (track info already in header) -->
   <tr>
-    <td style="background-color:#FFF9F0;padding:16px 36px;border-bottom:1px solid #E8E0D0;">
-      <p style="margin:0;font-size:13px;color:#5A4A28;font-family:Calibri,Arial,sans-serif;line-height:1.5;">
-        <strong>This month:</strong> Track {track.value} — {track_name}
-        &nbsp;·&nbsp; {month_human} &nbsp;·&nbsp; {source_note}
+    <td style="background-color:#FFF9F0;padding:14px 36px;border-bottom:1px solid #E8E0D0;">
+      <p style="margin:0;font-size:12px;color:#7A6040;font-family:Calibri,Arial,sans-serif;line-height:1.5;">
+        {month_human} Edition &nbsp;·&nbsp; {source_note}
       </p>
     </td>
   </tr>
 
-  <!-- Body -->
+  <!-- Body — word-break prevents long URLs overflowing the 680px container -->
   <tr>
-    <td style="padding:28px 36px;">
-      {_normalise_content_html(content_html)}
+    <td style="padding:28px 36px;word-break:break-word;overflow-wrap:break-word;">
+      {body_content}
     </td>
   </tr>
 
@@ -320,28 +344,32 @@ def _normalise_content_html(html: str) -> str:
     Apply inline styles to common HTML elements for Outlook compatibility.
 
     Styled to match the Structured Executive Brief (Option A) format:
-    - Theme headings (h2) with orange bottom border
+    - Theme headings (h2) with orange bottom border and top spacing for section separation
     - Briefing items (li) with orange left-border accent, no bullets
-    - Citation links (a) in orange
+    - Citation links (a) in orange at inherited font size (not forced-small)
     - Superscript citation numbers in orange
     - Opinion/Relevance labels (strong) in navy
+    - word-break on block elements prevents long URLs overflowing the container
+    - Handles ol, hr, blockquote, img for robustness regardless of synthesis output
     """
-    # Skip elements that already carry a style attribute
+    # Skip elements that already carry a style attribute throughout
     html = re.sub(
         r"<h1(?![^>]*\bstyle=)([^>]*)>",
         r'<h1\1 style="font-size:20px;font-weight:bold;color:#1B2A4A;'
-        r'font-family:Calibri,Arial,sans-serif;margin:24px 0 12px 0;">',
+        r'font-family:Calibri,Arial,sans-serif;margin:32px 0 12px 0;'
+        r'word-break:break-word;">',
         html, flags=re.IGNORECASE
     )
-    # Theme heading — orange underline, matches Option A section dividers
+    # Theme heading — orange underline; margin-top:28px separates consecutive sections
     html = re.sub(
         r"<h2(?![^>]*\bstyle=)([^>]*)>",
         r'<h2\1 style="font-size:17px;font-weight:bold;color:#1B2A4A;'
-        r'font-family:Calibri,Arial,sans-serif;margin:0 0 16px 0;'
-        r'padding-bottom:8px;border-bottom:2px solid #C87800;">',
+        r'font-family:Calibri,Arial,sans-serif;margin:28px 0 14px 0;'
+        r'padding-bottom:8px;border-bottom:2px solid #C87800;'
+        r'word-break:break-word;">',
         html, flags=re.IGNORECASE
     )
-    # Sub-label (e.g. "Theme 01" eyebrow) — uppercase orange
+    # Sub-label eyebrow (e.g. "Theme 01") — uppercase orange
     html = re.sub(
         r"<h3(?![^>]*\bstyle=)([^>]*)>",
         r'<h3\1 style="font-size:11px;font-weight:bold;color:#C87800;'
@@ -350,31 +378,49 @@ def _normalise_content_html(html: str) -> str:
         html, flags=re.IGNORECASE
     )
     html = re.sub(
+        r"<h4(?![^>]*\bstyle=)([^>]*)>",
+        r'<h4\1 style="font-size:13px;font-weight:bold;color:#1B2A4A;'
+        r'font-family:Calibri,Arial,sans-serif;margin:16px 0 6px 0;">',
+        html, flags=re.IGNORECASE
+    )
+    html = re.sub(
         r"<p(?![^>]*\bstyle=)([^>]*)>",
         r'<p\1 style="margin:0 0 8px 0;line-height:1.6;color:#4A4A4A;'
-        r'font-size:13px;font-family:Calibri,Arial,sans-serif;">',
+        r'font-size:13px;font-family:Calibri,Arial,sans-serif;'
+        r'word-break:break-word;overflow-wrap:break-word;">',
         html, flags=re.IGNORECASE
     )
-    # Remove bullets from lists; items carry their own left-border accent
+    # Unordered list — no bullets; items carry their own orange left-border accent.
+    # margin-bottom:28px provides clear visual gap before the next theme heading.
     html = re.sub(
         r"<ul(?![^>]*\bstyle=)([^>]*)>",
-        r'<ul\1 style="margin:0 0 20px 0;padding:0;list-style:none;">',
+        r'<ul\1 style="margin:0 0 28px 0;padding:0;list-style:none;">',
         html, flags=re.IGNORECASE
     )
-    # Each briefing item: orange left-border accent (Option A style)
+    # Ordered list — keep numbers, indent with standard padding
+    html = re.sub(
+        r"<ol(?![^>]*\bstyle=)([^>]*)>",
+        r'<ol\1 style="margin:0 0 16px 0;padding-left:20px;">',
+        html, flags=re.IGNORECASE
+    )
+    # Each briefing item: orange left-border accent (Option A style).
+    # word-break prevents long article titles or URLs breaking the layout.
     html = re.sub(
         r"<li(?![^>]*\bstyle=)([^>]*)>",
         r'<li\1 style="margin-bottom:20px;padding:0 0 0 16px;'
         r'border-left:3px solid #C87800;list-style:none;'
         r'font-size:13px;line-height:1.6;color:#4A4A4A;'
-        r'font-family:Calibri,Arial,sans-serif;">',
+        r'font-family:Calibri,Arial,sans-serif;'
+        r'word-break:break-word;overflow-wrap:break-word;">',
         html, flags=re.IGNORECASE
     )
-    # Citation and source links — orange, small, no underline (matches Option A [1] links)
+    # Citation and source links — orange, inherits font-size from parent (13px in body
+    # text, 10px when inside <sup>). word-break:break-all handles raw URL link text.
     html = re.sub(
         r"<a ([^>]*href=[^>]+)>",
         lambda m: (
-            f'<a {m.group(1)} style="color:#C87800;text-decoration:none;font-size:11px;">'
+            f'<a {m.group(1)} style="color:#C87800;text-decoration:none;'
+            f'word-break:break-all;">'
             if 'style=' not in m.group(1) else f'<a {m.group(1)}>'
         ),
         html, flags=re.IGNORECASE
@@ -385,7 +431,7 @@ def _normalise_content_html(html: str) -> str:
         r'<strong\1 style="font-weight:bold;color:#1B2A4A;font-family:Calibri,Arial,sans-serif;">',
         html, flags=re.IGNORECASE
     )
-    # Superscript citation numbers — orange, bold (matches Option A [1] superscripts)
+    # Superscript citation numbers — orange, bold
     html = re.sub(
         r"<sup(?![^>]*\bstyle=)([^>]*)>",
         r'<sup\1 style="font-size:10px;color:#C87800;font-weight:bold;vertical-align:super;">',
@@ -397,7 +443,35 @@ def _normalise_content_html(html: str) -> str:
         r'<em\1 style="font-style:italic;color:#666666;font-family:Calibri,Arial,sans-serif;">',
         html, flags=re.IGNORECASE
     )
-    # Strip div tags to avoid invalid nesting
+    # Horizontal rule — thin orange divider instead of the default grey bar
+    html = re.sub(
+        r"<hr(?![^>]*\bstyle=)([^>]*)>",
+        r'<hr\1 style="border:none;border-top:1px solid #E8C880;margin:24px 0;">',
+        html, flags=re.IGNORECASE
+    )
+    # Blockquote — indented italic with left accent (opinion or pull-quote)
+    html = re.sub(
+        r"<blockquote(?![^>]*\bstyle=)([^>]*)>",
+        r'<blockquote\1 style="margin:12px 0 12px 16px;padding:8px 16px;'
+        r'border-left:3px solid #C87800;font-style:italic;color:#555555;'
+        r'font-family:Calibri,Arial,sans-serif;font-size:13px;'
+        r'word-break:break-word;">',
+        html, flags=re.IGNORECASE
+    )
+    # Images — constrain to container width and prevent broken layout
+    html = re.sub(
+        r"<img(?![^>]*\bstyle=)([^>]*)>",
+        r'<img\1 style="max-width:100%;height:auto;display:block;border:0;">',
+        html, flags=re.IGNORECASE
+    )
+    # Inline code
+    html = re.sub(
+        r"<code(?![^>]*\bstyle=)([^>]*)>",
+        r'<code\1 style="font-family:Consolas,monospace;font-size:12px;'
+        r'background-color:#F5F5F5;padding:1px 4px;color:#333333;">',
+        html, flags=re.IGNORECASE
+    )
+    # Strip div tags to avoid invalid nesting with <p> or <li> elements
     html = re.sub(r"<div[^>]*>", "", html, flags=re.IGNORECASE)
     html = re.sub(r"</div>", "", html, flags=re.IGNORECASE)
 
