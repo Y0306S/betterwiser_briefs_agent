@@ -9,12 +9,12 @@ Everything you need, in order, from zero to a running agent.
 ```
 MINIMUM — verify pipeline works (demo run):
   ✅ Python 3.12 environment
-  ✅ Anthropic API key  (~$0.10 for demo, ~$17–24/month for real runs)
+  ✅ Anthropic API key  (~$0.10 for demo, ~$8–14/month for real runs)
   → Run: python demo_run.py
 
 MINIMUM — generate real briefings saved to disk:
   ✅ Python 3.12 environment
-  ✅ Anthropic API key  (~$17–24/month in API costs)
+  ✅ Anthropic API key  (~$8–14/month in API costs)
 
 TO READ NEWSLETTERS FROM INBOX + SEND EMAIL:
   + Microsoft Azure AD app registration (free setup)
@@ -87,8 +87,8 @@ python -m playwright install chromium --with-deps
 ### 2.2 Set up billing
 
 1. In the Anthropic Console → **Billing** → add a payment method
-2. Set a monthly **usage limit** of $50 as a safety cap
-   (Actual usage: ~$17–24/month for all 3 tracks)
+2. Set a monthly **usage limit** of $30 as a safety cap
+   (Actual usage: ~$8–14/month for all 3 tracks with the two-model strategy)
 
 ### 2.3 Create your .env file
 

@@ -115,10 +115,10 @@ python -m src.orchestrator --skip-context-update --month 2026-03
 ### Phase 2: Intelligence Gathering (5 Sub-Pipelines in Parallel)
 
 ```
-                          ┌─────────────────────┐
+                          ┌──────────────────────┐
                           │   GATHER PHASE       │
                           │  (all run at once)   │
-                          └─────────┬───────────┘
+                          └─────────┬────────────┘
               ┌──────────┬──────────┼──────────┬──────────┐
               │          │          │          │          │
               ▼          ▼          ▼          ▼          ▼
@@ -152,10 +152,10 @@ python -m src.orchestrator --skip-context-update --month 2026-03
   │                                                         │
   │  Pass 0  ──▶  Pass 1  ──▶  Pass 2  ──▶  Pass 3         │
   │  Cluster      Triage       DRAFT         Fact-check     │
-  │  & Dedup      & Sort       (Claude       (Citations     │
-  │  (thefuzz     (authority   Opus 4.6      API re-        │
-  │   match)      tiers)       extended      verifies       │
-  │                            thinking)     claims)        │
+  │  & Dedup      & Sort       (Opus 4.6     (Sonnet 4.6    │
+  │  (thefuzz     (authority   extended      Citations API  │
+  │   match)      tiers)       thinking)     re-verifies    │
+  │                                          claims)        │
   │                                │                        │
   │                         Pass 3.5  ──▶  Pass 4          │
   │                         Grounding      Format HTML      │
@@ -197,20 +197,27 @@ python -m src.orchestrator --skip-context-update --month 2026-03
 
 ## AI Models & External Services
 
-### Claude Opus 4.6 — Used In Three Ways
+### Two-Model Strategy
+
+The pipeline uses two Claude models to balance quality and cost. Model selection is controlled by `config/briefing_config.yaml` under the `model` and `research_model` keys.
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    CLAUDE OPUS 4.6                          │
-│                                                             │
-│  1. DISCOVERY          2. THOUGHT LEADERSHIP   3. SYNTHESIS │
-│  ─────────────         ─────────────────────   ──────────── │
-│  web_search tool       web_search (6 waves)    Extended     │
-│  Finds news &          web_fetch tool          Thinking     │
-│  announcements         Deep per-person         + Citations  │
-│  for all 3 tracks      research (Track C)      API          │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│  CLAUDE OPUS 4.6          │  CLAUDE SONNET 4.6                   │
+│  Pass 2 draft ONLY        │  Everything else                     │
+│  ───────────────────────  │  ─────────────────────────────────── │
+│  Extended thinking        │  Pass 3 factcheck (Citations API)    │
+│  (budget 10k tokens)      │  Discovery queries (all 3 tracks)    │
+│  Citations API            │  TL Waves 1–6 (50–75 calls/run)      │
+│  30-source context        │  Phase 0 context update              │
+│                           │                                      │
+│  Where quality matters:   │  Where volume matters:               │
+│  multi-source editorial   │  JSON extraction, web search,        │
+│  synthesis + judgement    │  structured verification             │
+└──────────────────────────────────────────────────────────────────┘
 ```
+
+**Why this split?** Opus's extended thinking and multi-document reasoning justify the premium for Pass 2, where editorial judgement determines the final briefing quality. Every other call is structured extraction or JSON output — tasks Sonnet handles reliably at ~5× lower cost.
 
 ### External Services
 
@@ -227,8 +234,8 @@ python -m src.orchestrator --skip-context-update --month 2026-03
 │  │  Anthropic  │  │   Jina       │  │  Azure   │                 │
 │  │     API     │  │  Reader      │  │    AD    │                 │
 │  │  REQUIRED   │  │   FREE       │  │ OPTIONAL │                 │
-│  │ Claude Opus │  │ r.jina.ai    │  └────┬─────┘                 │
-│  │ 4.6 model   │  └──────┬───────┘       │                       │
+│  │ Opus 4.6 +  │  │ r.jina.ai    │  └────┬─────┘                 │
+│  │ Sonnet 4.6  │  └──────┬───────┘       │                       │
 │  └─────────────┘         │               ▼                       │
 │                           │    ┌──────────────────┐              │
 │                    ┌──────┘    │  Microsoft Graph  │              │
@@ -256,17 +263,17 @@ The dashboard provides a browser-based interface for non-technical users.
 ┌──────────────────────────────────────────────────────────────┐
 │  BetterWiser · Briefing Agent                                │
 ├──────────────────────────────────────────────────────────────┤
-│  ⚡ Generate New Briefing                                     │
+│  Generate New Briefing                                       │
 │                                                              │
-│  Month: [2026-03]    Tracks: [✓A] [✓B] [✓C]                │
-│  Mode:  [💾 Save to Disk] [📧 Send via Email]               │
+│  Month: [2026-03]    Tracks: [vA] [vB] [vC]                 │
+│  Mode:  [Save to Disk]  [Send via Email]                     │
 │                                                              │
-│  [ ▶ Generate Briefing ]                                     │
+│  [ >> Generate Briefing ]                                    │
 ├──────────────────────────────────────────────────────────────┤
-│  📋 Run History                                              │
+│  Run History                                                 │
 │                                                              │
-│  2026-03  ✓ Done    [A] [B] [C⚠]  View logs                 │
-│  2026-02  ✓ Done    [A] [B] [C]   View logs                 │
+│  2026-03  v Done    [A] [B] [C!]  View logs                  │
+│  2026-02  v Done    [A] [B] [C]   View logs                  │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -392,7 +399,7 @@ betterwiser_briefs_agent/
 
 ```
 Layer 1: CITATIONS         Every claim must be traceable to a
-─────────────────          scraped source (Anthropic Citations API)
+──────────────────         scraped source (Anthropic Citations API)
 
 Layer 2: GROUNDING         95%+ of claims must fuzzy-match source
 ──────────────────         text (configurable in briefing_config.yaml)
@@ -407,14 +414,17 @@ Layer 3: HELD FOR REVIEW   Below 95% → saved to disk, NOT emailed,
 
 | Component | Per Monthly Run |
 |-----------|----------------|
-| Claude Opus 4.6 (synthesis) | ~$15–20 |
+| Claude Opus 4.6 (Pass 2 synthesis — 3 calls/run) | ~$4–6 |
+| Claude Sonnet 4.6 (research, factcheck, discovery — 80–110 calls/run) | ~$2–4 |
 | Claude web searches (150–255) | ~$1.50–2.55 |
-| Phase 0: LinkedIn profile + web searches (~5 queries) | ~$0.05 |
+| Phase 0: context update (~5 queries) | ~$0.05 |
 | Tavily deep research | ~$0.50–1.00 |
 | Jina Reader | Free |
 | Spider API | ~$0.02 |
 | Microsoft Graph | Free |
 | GitHub Actions | Free (private repo) |
-| **Total** | **~$17–24 / month** |
+| **Total** | **~$8–14 / month** |
 
 **Demo run cost:** under $0.10 total for all 3 tracks (Claude Haiku, no extended thinking, synthetic data only).
+
+> **Two-model savings:** Opus is used only for Pass 2 (3 calls/run — one per track). All other ~80–110 calls use Sonnet 4.6 at ~5× lower cost. Estimated saving vs. Opus-only: 50–60% (~$9–10/month).

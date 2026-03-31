@@ -267,12 +267,15 @@ betterwiser_briefs_agent/
 
 | Component | Cost per run |
 |-----------|-------------|
-| Claude API (claude-opus-4-6) | ~$15–$20 (standard) / ~$8–$10 (batch API) |
+| Claude Opus 4.6 (Pass 2 synthesis — 3 calls/run) | ~$4–$6 |
+| Claude Sonnet 4.6 (research, factcheck, discovery) | ~$2–$4 |
 | Claude web searches (150–250) | ~$1.50–$2.50 |
 | Tavily deep research | ~$0.50–$1.00 |
 | Jina Reader | Free |
 | Spider API (~50 pages) | ~$0.02 |
 | Microsoft Graph | Free |
-| **Total per monthly run** | **~$17–$24** |
+| **Total per monthly run** | **~$8–$14** |
 
-To reduce costs: use `--track C` to run only Track C (the most expensive due to deep research).
+The pipeline uses a **two-model strategy**: Claude Opus 4.6 for Pass 2 synthesis only (extended thinking, multi-source editorial), and Claude Sonnet 4.6 for all other calls (~80–110 per run — JSON extraction, web search, factcheck). This saves ~50–60% vs. running all calls on Opus. Model selection is configured in `config/briefing_config.yaml` under the `model` and `research_model` keys.
+
+To reduce costs further: use `--track C` to run only Track C (the most expensive due to deep research).

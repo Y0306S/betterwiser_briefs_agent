@@ -6,11 +6,15 @@ run:
   log_level: "INFO"
 
 model:
-  id: "claude-opus-4-6"
+  id: "claude-opus-4-6"          # Pass 2 synthesis only — needs extended thinking + multi-doc reasoning
   extended_thinking_budget: 10000
   max_tokens: 16000
   max_context_sources: 30        # max scraped sources sent to Pass 2 draft
   source_content_max_chars: 4000 # truncate each source to this length
+
+research_model:
+  id: "claude-sonnet-4-6"        # All research + factcheck calls — JSON extraction, web search, verification
+  max_tokens: 4096               # Research calls never need long outputs
 
 tracks:
   - id: "A"

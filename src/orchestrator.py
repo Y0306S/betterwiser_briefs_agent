@@ -222,9 +222,23 @@ async def _run_pipeline(
         return 1
 
     # Initialise Anthropic client (shared across all phases)
-    model_config = config.get("model", {})
-    model_id = model_config.get("id", "claude-opus-4-6")
+    # synthesis_model_config  → Pass 2 only (Opus, extended thinking, 16k tokens)
+    # research_model_config   → everything else (Sonnet: discovery, TL waves, factcheck, Phase 0)
+    synthesis_model_config = config.get("model", {})
+    research_cfg = config.get("research_model", {})
+    research_model_config = {
+        **synthesis_model_config,           # inherit source limits from main config
+        "id": research_cfg.get("id", "claude-sonnet-4-6"),
+        "max_tokens": research_cfg.get("max_tokens", 4096),
+        "extended_thinking_budget": 0,      # never use thinking for research calls
+    }
+    synthesis_model_id = synthesis_model_config.get("id", "claude-opus-4-6")
+    research_model_id = research_model_config["id"]
     claude = anthropic.AsyncAnthropic(api_key=api_key)
+
+    logger.info(
+        f"Models: synthesis={synthesis_model_id}, research={research_model_id}"
+    )
 
     # Save RunContext for resume capability
     _save_checkpoint(run_context.model_dump_json(indent=2), run_id, runs_dir, "run_context.json")
@@ -236,7 +250,7 @@ async def _run_pipeline(
         try:
             context_updated = await update_context_if_needed(
                 client=claude,
-                model_id=model_id,
+                model_id=research_model_id,
                 month=month,
             )
             if context_updated:
@@ -258,7 +272,7 @@ async def _run_pipeline(
     # ---------------------------------------------------------------------------
     logger.info("Phase 2: Gathering intelligence")
 
-    gathered = await _gather_phase(run_context, config, claude, model_id, resume_path)
+    gathered = await _gather_phase(run_context, config, claude, research_model_id, resume_path)
     archive_gathered_data(gathered, run_id, runs_dir)
 
     logger.info(
@@ -276,7 +290,11 @@ async def _run_pipeline(
     logger.info(f"Phase 3: Synthesising {len(tracks)} tracks")
 
     synthesis_tasks = [
-        _synthesise_track(track, gathered, config, claude, model_id, resume_path)
+        _synthesise_track(
+            track, gathered, config, claude,
+            synthesis_model_config, research_model_config,
+            resume_path,
+        )
         for track in tracks
     ]
     synthesis_results = await asyncio.gather(*synthesis_tasks, return_exceptions=True)
@@ -475,12 +493,16 @@ async def _synthesise_track(
     gathered: GatheredData,
     config: dict,
     claude: anthropic.AsyncAnthropic,
-    model_id: str,
+    synthesis_model_config: dict,
+    research_model_config: dict,
     resume_path: Optional[str],
 ) -> ValidatedBriefing:
-    """Run all 6 synthesis passes for one track."""
+    """Run all 6 synthesis passes for one track.
+
+    Pass 2 (draft) uses synthesis_model_config (Opus + extended thinking).
+    Pass 3 (factcheck) uses research_model_config (Sonnet, no thinking).
+    """
     logger.info(f"Track {track.value}: starting 6-pass synthesis")
-    model_config = config.get("model", {})
     grounding_config = config.get("grounding", {})
 
     # Check for synthesis resume checkpoint
@@ -512,24 +534,24 @@ async def _synthesise_track(
         item_count_max=track_config.get("item_count_max"),
     )
 
-    # Pass 2: Draft with extended thinking + citations
+    # Pass 2: Draft with extended thinking + citations (Opus)
     synthesis = await pass2_draft.draft_briefing(
         track=track,
         gathered=gathered,
         clusters=sorted_clusters,
         client=claude,
-        model_config=model_config,
+        model_config=synthesis_model_config,
     )
 
     # Archive synthesis after pass 2 (for resume)
     archive_synthesis(synthesis, gathered.run_context.run_id, gathered.run_context.runs_dir)
 
-    # Pass 3: Fact-check with Citations API
+    # Pass 3: Fact-check with Citations API (Sonnet — structured verification, no reasoning needed)
     synthesis = await pass3_factcheck.fact_check(
         synthesis=synthesis,
         gathered=gathered,
         client=claude,
-        model_config=model_config,
+        model_config=research_model_config,
     )
 
     # Pass 3.5: Programmatic grounding verification
