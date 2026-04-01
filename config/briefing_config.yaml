@@ -195,6 +195,51 @@ recipients:
     - email: "lynette@betterwiser.com"
       name: "Lynette Ooi"
 
+# Gathering behaviour overrides
+gathering:
+  post_discovery_scrape_max: 20   # scrape top N discovered articles for full content before Pass 2
+
+# RSS feeds — ingested in parallel during Phase 2 (sub-pipeline F)
+# track: A or B (feeds for Track C are picked up via thought_leadership.py waves)
+# tier: tier_1 | tier_2 | tier_3 — used for source authority ranking in triage
+rss_feeds:
+  - url: "https://www.artificiallawyer.com/feed/"
+    track: "A"
+    source_name: "Artificial Lawyer"
+    tier: "tier_2"
+  - url: "https://lawnext.com/feed/"
+    track: "A"
+    source_name: "LawNext"
+    tier: "tier_2"
+  - url: "https://www.legalfutures.co.uk/feed"
+    track: "A"
+    source_name: "Legal Futures"
+    tier: "tier_2"
+  - url: "https://www.lawgazette.com.sg/rss"
+    track: "A"
+    source_name: "Singapore Law Gazette"
+    tier: "tier_2"
+  - url: "https://techcrunch.com/tag/legal-tech/feed/"
+    track: "A"
+    source_name: "TechCrunch LegalTech"
+    tier: "tier_2"
+  - url: "https://www.pdpc.gov.sg/rss/news"
+    track: "B"
+    source_name: "PDPC Singapore"
+    tier: "tier_1"
+  - url: "https://www.mas.gov.sg/rss/news"
+    track: "B"
+    source_name: "MAS Singapore"
+    tier: "tier_1"
+  - url: "https://www.minlaw.gov.sg/rss/news"
+    track: "B"
+    source_name: "MinLaw Singapore"
+    tier: "tier_1"
+  - url: "https://iapp.org/feed/"
+    track: "B"
+    source_name: "IAPP Privacy"
+    tier: "tier_2"
+
 # Email subject templates
 email_subjects:
   A: "BetterWiser Legal Intelligence — Vendor & Customer Update — {month_human}"

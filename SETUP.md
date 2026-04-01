@@ -240,11 +240,15 @@ betterwiser_briefs_agent/
 │   └── prompt_templates/             ← Track-specific Claude system prompts
 ├── src/
 │   ├── orchestrator.py               ← CLI entry point: python -m src.orchestrator
-│   ├── schemas.py                    ← All Pydantic v2 data models
-│   ├── gatherers/                    ← Phase 2: data gathering (5 sub-pipelines)
+│   ├── schemas.py                    ← All Pydantic v2 data models (incl. SynthesisDraft)
+│   ├── gatherers/                    ← Phase 2: data gathering (6 sub-pipelines)
+│   │   └── rss_reader.py             ← Sub-pipeline F: RSS/Atom feed ingestion
 │   ├── synthesis/                    ← Phase 3: 6-pass synthesis pipeline
+│   │   └── pass_cross_track.py       ← Post-synthesis cross-track annotation
 │   ├── delivery/                     ← Phase 5: email + archive
 │   └── utils/                        ← Shared utilities
+│       ├── trend_db.py               ← Entity mention counter across months
+│       └── wayback.py                ← CDX API verification for dead links
 ├── runs/                             ← Output directory (auto-created)
 │   └── 2026-03_run_20260301T080000/
 │       ├── run.log
@@ -268,14 +272,16 @@ betterwiser_briefs_agent/
 | Component | Cost per run |
 |-----------|-------------|
 | Claude Opus 4.6 (Pass 2 synthesis — 3 calls/run) | ~$4–$6 |
-| Claude Sonnet 4.6 (research, factcheck, discovery) | ~$2–$4 |
-| Claude web searches (150–250) | ~$1.50–$2.50 |
+| Claude Sonnet 4.6 (research, factcheck, discovery — 85–120 calls) | ~$2–$4 |
+| Claude web searches (160–270 incl. Wave 7 contrarian) | ~$1.60–$2.70 |
 | Tavily deep research | ~$0.50–$1.00 |
+| RSS feeds | Free |
+| Wayback CDX API | Free |
 | Jina Reader | Free |
 | Spider API (~50 pages) | ~$0.02 |
 | Microsoft Graph | Free |
 | **Total per monthly run** | **~$8–$14** |
 
-The pipeline uses a **two-model strategy**: Claude Opus 4.6 for Pass 2 synthesis only (extended thinking, multi-source editorial), and Claude Sonnet 4.6 for all other calls (~80–110 per run — JSON extraction, web search, factcheck). This saves ~50–60% vs. running all calls on Opus. Model selection is configured in `config/briefing_config.yaml` under the `model` and `research_model` keys.
+The pipeline uses a **two-model strategy**: Claude Opus 4.6 for Pass 2 synthesis only (extended thinking, `tool_use` structured output → `SynthesisDraft`), and Claude Sonnet 4.6 for all other calls (~85–120 per run — JSON extraction, web search, factcheck, cross-track annotation). This saves ~50–60% vs. running all calls on Opus. Model selection is configured in `config/briefing_config.yaml` under the `model` and `research_model` keys.
 
 To reduce costs further: use `--track C` to run only Track C (the most expensive due to deep research).

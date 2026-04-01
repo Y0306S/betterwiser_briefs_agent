@@ -41,14 +41,19 @@ from src.delivery.archiver import archive_gathered_data, archive_synthesis
 from src.delivery.email_sender import send_briefing
 from src.gatherers import discovery, history_loader, inbox_reader, thought_leadership
 from src.gatherers.profile_updater import update_context_if_needed
+from src.gatherers.rss_reader import read_feeds
 from src.gatherers.thought_leadership import _wave1_newsletter_extraction
 from src.gatherers.web_scraper import scrape_urls
 from src.schemas import (
     BriefingTrack,
     DeliveryReceipt,
+    DiscoveredArticle,
     GatheredData,
     GatheringStats,
     RunContext,
+    ScrapedSource,
+    SourceTier,
+    SynthesisResult,
     ValidatedBriefing,
 )
 from src.synthesis import (
@@ -59,6 +64,8 @@ from src.synthesis import (
     pass35_grounding,
     pass4_format,
 )
+from src.synthesis.pass_cross_track import annotate_cross_track
+from src.utils import trend_db as _trend_db
 from src.utils.logging_config import setup_logging
 
 logger = logging.getLogger(__name__)
@@ -300,6 +307,45 @@ async def _run_pipeline(
     synthesis_results = await asyncio.gather(*synthesis_tasks, return_exceptions=True)
 
     # ---------------------------------------------------------------------------
+    # Cross-track connector: annotate shared entities across all three tracks
+    # ---------------------------------------------------------------------------
+    # Build a mapping of track → SynthesisResult (skip failed tracks)
+    synthesis_map: dict[BriefingTrack, SynthesisResult] = {}
+    for track, result in zip(tracks, synthesis_results):
+        if not isinstance(result, Exception):
+            # result is a ValidatedBriefing; its synthesis is the SynthesisResult
+            synthesis_map[track] = result.synthesis  # type: ignore[union-attr]
+
+    if len(synthesis_map) > 1:
+        try:
+            logger.info("Cross-track pass: annotating shared entities")
+            annotated_map = annotate_cross_track(synthesis_map)
+            # Propagate updated syntheses back into ValidatedBriefing objects
+            for i, (track, sr) in enumerate(zip(tracks, synthesis_results)):
+                if not isinstance(sr, Exception) and track in annotated_map:
+                    sr.synthesis = annotated_map[track]  # type: ignore[union-attr]
+        except Exception as e:
+            logger.warning(f"Cross-track pass failed (non-fatal): {e}")
+
+    # ---------------------------------------------------------------------------
+    # Trend DB: record entity mentions from this month's drafts
+    # ---------------------------------------------------------------------------
+    try:
+        trend = _trend_db.load(runs_dir)
+        for track, synthesis in synthesis_map.items():
+            if synthesis.draft is None:
+                continue
+            for section in synthesis.draft.sections:
+                for item in section.items:
+                    trend.record(month, item.heading)
+                    if item.source_name:
+                        trend.record(month, item.source_name)
+        trend.save(runs_dir)
+        logger.info(f"Trend DB: updated with {month} entity mentions")
+    except Exception as e:
+        logger.warning(f"Trend DB update failed (non-fatal): {e}")
+
+    # ---------------------------------------------------------------------------
     # Phase 4: Validate + Phase 5: Deliver (per track)
     # ---------------------------------------------------------------------------
     receipts: list[DeliveryReceipt] = []
@@ -359,7 +405,7 @@ async def _gather_phase(
     model_id: str,
     resume_path: Optional[str],
 ) -> GatheredData:
-    """Run all 5 gathering sub-pipelines in parallel with graceful degradation."""
+    """Run all 6 gathering sub-pipelines in parallel with graceful degradation."""
 
     # Check for resume checkpoint
     if resume_path:
@@ -373,16 +419,15 @@ async def _gather_phase(
 
     month = run_context.month
     queries_by_track = config.get("discovery_queries", {})
-    newsletter_config = _load_newsletter_subscriptions()
     watchlist_config = _load_vendor_watchlist()
     curated_urls = _get_curated_urls(config, run_context.tracks)
+    rss_feed_configs = config.get("rss_feeds", [])
 
-    # Load thought_leadership watchlist for Track C
     tl_in_tracks = BriefingTrack.C in run_context.tracks
 
     start_time = datetime.now(tz=timezone.utc)
 
-    # Run all 5 sub-pipelines concurrently
+    # Run all 6 sub-pipelines concurrently
     # return_exceptions=True ensures one failure doesn't kill everything
     (
         email_result,
@@ -390,6 +435,7 @@ async def _gather_phase(
         discover_result,
         tl_result,
         history_result,
+        rss_result,
     ) = await asyncio.gather(
         inbox_reader.read_inbox(month),                                      # A
         scrape_urls(curated_urls),                                           # B
@@ -410,6 +456,7 @@ async def _gather_phase(
             ) if tl_in_tracks else asyncio.sleep(0, result=[])
         ),
         asyncio.to_thread(history_loader.load_previous_month, run_context.runs_dir, month),  # E
+        read_feeds(rss_feed_configs, month),                                 # F (RSS feeds)
         return_exceptions=True,
     )
 
@@ -421,9 +468,13 @@ async def _gather_phase(
     discovered = _safe_list(discover_result, "Claude discovery")
     tl_articles = _safe_list(tl_result, "thought leadership research")
     history = history_result if isinstance(history_result, str) else None
+    rss_articles = _safe_list(rss_result, "RSS feeds")
+
+    if rss_articles:
+        logger.info(f"RSS sub-pipeline: {len(rss_articles)} articles ingested")
 
     # If inbox was available, supplement Wave 1 with actual email content.
-    # Only re-run Wave 1 (newsletter extraction) — NOT all 6 waves — to avoid
+    # Only re-run Wave 1 (newsletter extraction) — NOT all 7 waves — to avoid
     # doubling the entire TL research cost.
     if emails and tl_in_tracks and not isinstance(tl_result, Exception):
         logger.info("Supplementing thought leadership Wave 1 with actual email content")
@@ -444,20 +495,25 @@ async def _gather_phase(
         if not emails:
             logger.info(
                 "No emails available — Track C thought leadership will rely on "
-                "web search waves (2–6) and Tavily only"
+                "web search waves (2–7) and Tavily only"
             )
         elif not tl_in_tracks:
             logger.debug("Track C not selected — skipping email Wave 1 supplement")
         else:
             logger.debug("Track C thought leadership result unavailable — skipping email supplement")
 
-    # Merge discovered + TL articles, deduplicating by URL
+    # Merge discovered + TL + RSS articles, deduplicating by URL
     _seen_urls: set[str] = set()
-    all_discovered = []
-    for _article in discovered + tl_articles:
+    all_discovered: list[DiscoveredArticle] = []
+    for _article in discovered + tl_articles + rss_articles:
         if _article.url not in _seen_urls:
             _seen_urls.add(_article.url)
             all_discovered.append(_article)
+
+    # Post-discovery scraping: scrape full content from top discovered articles
+    # so Pass 2 has complete text rather than 2-3 sentence snippets.
+    # Cap at 20 to keep cost and latency bounded.
+    scraped = await _post_discovery_scrape(scraped, all_discovered, config)
 
     stats = GatheringStats(
         emails_read=len(emails),
@@ -482,6 +538,49 @@ async def _gather_phase(
         historical_context=history,
         stats=stats,
     )
+
+
+async def _post_discovery_scrape(
+    existing_scraped: list[ScrapedSource],
+    discovered: list[DiscoveredArticle],
+    config: dict,
+) -> list[ScrapedSource]:
+    """
+    Scrape full content from the top discovered articles not already scraped.
+
+    Prioritises articles from higher tiers and longer snippets (as a proxy for
+    content quality).  Caps at 20 articles to keep latency bounded.
+    """
+    post_scrape_max = config.get("gathering", {}).get("post_discovery_scrape_max", 20)
+    if post_scrape_max <= 0:
+        return existing_scraped
+
+    already_scraped_urls = {s.url for s in existing_scraped if not s.error}
+
+    # Sort by tier (lower tier value = higher authority) then snippet length
+    tier_order = {"tier_1": 0, "tier_2": 1, "tier_3": 2}
+    candidates = [a for a in discovered if a.url not in already_scraped_urls]
+    candidates.sort(key=lambda a: (tier_order.get(a.tier.value, 2), -len(a.snippet or "")))
+    to_scrape_urls = [a.url for a in candidates[:post_scrape_max]]
+
+    if not to_scrape_urls:
+        return existing_scraped
+
+    logger.info(
+        f"Post-discovery scraping: fetching full content for "
+        f"{len(to_scrape_urls)} top discovered articles"
+    )
+
+    try:
+        new_scraped = await scrape_urls(to_scrape_urls)
+        logger.info(
+            f"Post-discovery scraping: {len([s for s in new_scraped if not s.error])} "
+            f"pages scraped successfully"
+        )
+        return existing_scraped + new_scraped
+    except Exception as e:
+        logger.warning(f"Post-discovery scraping failed (non-fatal): {e}")
+        return existing_scraped
 
 
 # ---------------------------------------------------------------------------

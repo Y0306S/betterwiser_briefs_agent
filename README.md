@@ -68,8 +68,9 @@ python -m src.orchestrator --month 2026-03 --send
 │  │ CONTEXT  │    │ TRIGGER  │    │  GATHER  │    │ SYNTHESISE │   │
 │  │ UPDATE   │    │          │    │          │    │            │   │
 │  └──────────┘    └──────────┘    └──────────┘    └────────────┘   │
-│  LinkedIn +      Build context   5 sub-pipelines  6-pass pipeline   │
-│  web search      Load config     run in parallel  per track         │
+│  LinkedIn +      Build context   6 sub-pipelines  6-pass pipeline   │
+│  web search      Load config     run in parallel  per track +       │
+│  refresh                                          cross-track pass  │
 │  refresh                                               │            │
 │  context.txt                                     ┌──────────┐      │
 │                                                  │ PHASE 4  │      │
@@ -112,26 +113,28 @@ profile state.
 python -m src.orchestrator --skip-context-update --month 2026-03
 ```
 
-### Phase 2: Intelligence Gathering (5 Sub-Pipelines in Parallel)
+### Phase 2: Intelligence Gathering (6 Sub-Pipelines in Parallel)
 
 ```
-                          ┌──────────────────────┐
-                          │   GATHER PHASE       │
-                          │  (all run at once)   │
-                          └─────────┬────────────┘
-              ┌──────────┬──────────┼──────────┬──────────┐
-              │          │          │          │          │
-              ▼          ▼          ▼          ▼          ▼
-        ┌──────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐
-        │  INBOX   │ │  WEB   │ │CLAUDE  │ │THOUGHT │ │HISTORY │
-        │ READER   │ │SCRAPER │ │DISCOV. │ │LEADER. │ │LOADER  │
-        │          │ │        │ │        │ │WAVES   │ │        │
-        │ MS Graph │ │Jina →  │ │web_    │ │(Track C│ │Previous│
-        │ Azure AD │ │Spider→ │ │search  │ │ only)  │ │month   │
-        │ Optional │ │Crawl4AI│ │queries │ │6 waves │ │context │
-        └──────────┘ └────────┘ └────────┘ └────────┘ └────────┘
-              │          │          │          │          │
-              └──────────┴──────────┴──────────┴──────────┘
+                    ┌──────────────────────────────┐
+                    │         GATHER PHASE         │
+                    │      (all run at once)       │
+                    └──────────────┬───────────────┘
+         ┌──────────┬──────────┬───┴──────┬──────────┬──────────┐
+         │          │          │          │          │          │
+         ▼          ▼          ▼          ▼          ▼          ▼
+   ┌──────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐
+   │  INBOX   │ │  WEB   │ │CLAUDE  │ │THOUGHT │ │HISTORY │ │  RSS   │
+   │ READER   │ │SCRAPER │ │DISCOV. │ │LEADER. │ │LOADER  │ │READER  │
+   │          │ │        │ │        │ │WAVES   │ │        │ │        │
+   │ MS Graph │ │Jina →  │ │web_    │ │(Track C│ │Previous│ │Track   │
+   │ Azure AD │ │Spider→ │ │search  │ │ only)  │ │month   │ │ A & B  │
+   │ Optional │ │Crawl4AI│ │queries │ │7 waves │ │context │ │ feeds  │
+   └──────────┘ └────────┘ └────────┘ └────────┘ └────────┘ └────────┘
+         │          │          │          │          │          │
+         └──────────┴──────────┴──────────┴──────────┴──────────┘
+                                    │
+                     post-discovery scrape (top 20 articles)
                                     │
                               GatheredData
                            (Pydantic v2 model)
@@ -140,32 +143,48 @@ python -m src.orchestrator --skip-context-update --month 2026-03
 > **Graceful degradation**: If inbox credentials are missing → web-only.
 > If Spider API key missing → falls back to Jina (free). Each sub-pipeline
 > failure is logged and the pipeline continues regardless.
+>
+> **Post-discovery scraping**: After all 6 pipelines complete, the top 20
+> discovered articles are fully scraped for complete content before Pass 2,
+> giving Opus full article text instead of 2–3 sentence snippets.
 
-### Phase 3: Six-Pass Synthesis (per Track)
+### Phase 3: Six-Pass Synthesis (per Track) + Cross-Track Connector
 
 ```
   GatheredData
        │
        ▼
-  ┌─────────────────────────────────────────────────────────┐
-  │                    SYNTHESIS PIPELINE                    │
-  │                                                         │
-  │  Pass 0  ──▶  Pass 1  ──▶  Pass 2  ──▶  Pass 3         │
-  │  Cluster      Triage       DRAFT         Fact-check     │
-  │  & Dedup      & Sort       (Opus 4.6     (Sonnet 4.6    │
-  │  (thefuzz     (authority   extended      Citations API  │
-  │   match)      tiers)       thinking)     re-verifies    │
-  │                                          claims)        │
-  │                                │                        │
-  │                         Pass 3.5  ──▶  Pass 4          │
-  │                         Grounding      Format HTML      │
-  │                         Verify         (Outlook-safe    │
-  │                         (fuzzy ≥ 0.95) table layout,    │
-  │                                        link validate)   │
-  └─────────────────────────────────────────────────────────┘
+  ┌─────────────────────────────────────────────────────────────┐
+  │               SYNTHESIS PIPELINE (per track)                │
+  │                                                             │
+  │  Pass 0  ──▶  Pass 1  ──▶     Pass 2      ──▶  Pass 3      │
+  │  Cluster      Triage        DRAFT              Fact-check   │
+  │  & Dedup      & Sort        (Opus 4.6          (Sonnet 4.6  │
+  │  (thefuzz     (authority    extended            Citations    │
+  │   match)      tiers)        thinking +          API; items  │
+  │                             tool_use →          from draft; │
+  │                             SynthesisDraft)     correction  │
+  │                                                 loop)       │
+  │                                    │                        │
+  │                             Pass 3.5  ──▶  Pass 4           │
+  │                             Grounding      Format HTML      │
+  │                             Verify         (deterministic   │
+  │                             (fuzzy ≥ 0.95) draft render,    │
+  │                                            CDX-verified     │
+  │                                            Wayback links,   │
+  │                                            feedback links)  │
+  └─────────────────────────────────────────────────────────────┘
+       │ (all 3 tracks)
+       ▼
+  ┌─────────────────────────────────────────────────────────────┐
+  │          CROSS-TRACK CONNECTOR  (post-synthesis)            │
+  │  Identifies entities shared across tracks → injects         │
+  │  [See also: Track X: section] annotations                   │
+  │  Trend DB: records entity mention counts per month          │
+  └─────────────────────────────────────────────────────────────┘
        │
        ▼
-  ValidatedBriefing
+  ValidatedBriefing (x3)
 ```
 
 ### Phase 5: Delivery Decision Tree
@@ -208,8 +227,9 @@ The pipeline uses two Claude models to balance quality and cost. Model selection
 │  ───────────────────────  │  ─────────────────────────────────── │
 │  Extended thinking        │  Pass 3 factcheck (Citations API)    │
 │  (budget 10k tokens)      │  Discovery queries (all 3 tracks)    │
-│  Citations API            │  TL Waves 1–6 (50–75 calls/run)      │
-│  30-source context        │  Phase 0 context update              │
+│  tool_use structured      │  TL Waves 1–7 (55–85 calls/run)      │
+│  output (SynthesisDraft)  │  Phase 0 context update              │
+│  30-source context        │  Cross-track entity extraction       │
 │                           │                                      │
 │  Where quality matters:   │  Where volume matters:               │
 │  multi-source editorial   │  JSON extraction, web search,        │
@@ -227,20 +247,20 @@ The pipeline uses two Claude models to balance quality and cost. Model selection
 │                                                                    │
 │   src/orchestrator.py  (or GitHub Actions runner)                 │
 │          │                                                         │
-│    ┌─────┼──────────────────────────────┐                         │
-│    │     │                              │                         │
-│    ▼     ▼                              ▼                         │
-│  ┌─────────────┐  ┌──────────────┐  ┌──────────┐                 │
-│  │  Anthropic  │  │   Jina       │  │  Azure   │                 │
-│  │     API     │  │  Reader      │  │    AD    │                 │
-│  │  REQUIRED   │  │   FREE       │  │ OPTIONAL │                 │
-│  │ Opus 4.6 +  │  │ r.jina.ai    │  └────┬─────┘                 │
-│  │ Sonnet 4.6  │  └──────┬───────┘       │                       │
-│  └─────────────┘         │               ▼                       │
-│                           │    ┌──────────────────┐              │
-│                    ┌──────┘    │  Microsoft Graph  │              │
-│                    │           │  Email Read/Send  │              │
-│                    ▼           └──────────────────┘              │
+│    ┌─────┼──────────────────────────────────────┐                 │
+│    │     │                              │        │                 │
+│    ▼     ▼                              ▼        ▼                 │
+│  ┌─────────────┐  ┌──────────────┐  ┌──────┐ ┌──────────────┐   │
+│  │  Anthropic  │  │   Jina       │  │Azure │ │   RSS feeds  │   │
+│  │     API     │  │  Reader      │  │  AD  │ │ (HTTP, free) │   │
+│  │  REQUIRED   │  │   FREE       │  │ OPT. │ │ Track A + B  │   │
+│  │ Opus 4.6 +  │  │ r.jina.ai    │  └──┬───┘ └──────────────┘   │
+│  │ Sonnet 4.6  │  └──────┬───────┘     │                         │
+│  └─────────────┘         │             ▼                         │
+│                           │  ┌──────────────────┐                │
+│                    ┌──────┘  │  Microsoft Graph  │                │
+│                    │         │  Email Read/Send  │                │
+│                    ▼         └──────────────────┘                │
 │             ┌─────────────┐                                       │
 │             │   Spider    │  OPTIONAL — fallback after Jina       │
 │             │     API     │                                       │
@@ -249,6 +269,12 @@ The pipeline uses two Claude models to balance quality and cost. Model selection
 │                    ▼                                              │
 │             ┌─────────────┐                                       │
 │             │   Tavily    │  OPTIONAL — Track C deep research     │
+│             └──────┬──────┘                                       │
+│                    │                                              │
+│                    ▼                                              │
+│             ┌─────────────┐                                       │
+│             │   Wayback   │  OPTIONAL — dead-link verification    │
+│             │  CDX API    │  (free, Internet Archive)             │
 │             └─────────────┘                                       │
 └────────────────────────────────────────────────────────────────────┘
 ```
@@ -329,7 +355,7 @@ The workflow at [.github/workflows/monthly_briefing.yml](.github/workflows/month
 - US: NIST, FTC, White House OSTP
 
 ### Track C — Thought Leadership Digest
-6-wave deep research process:
+7-wave deep research process:
 ```
 Wave 1  Extract thought leaders from newsletters
 Wave 2  Per-person deep search (4+ queries each)
@@ -337,8 +363,11 @@ Wave 3  Retrieve firm insights pages (PwC, McKinsey, EY, Deloitte…)
 Wave 4  Tavily advanced research for strategic themes
 Wave 5  Semantic similarity expansion
 Wave 6  Conference speaker mining → extend watchlist
+Wave 7  Contrarian/critical perspective search (balances consensus)
 ```
 Each article gets: Summary · Opinion Takeaway · BetterWiser Relevance
+
+Wave 7 identifies the month's 3 dominant consensus themes from gathered articles, then actively searches for critical, sceptical, and cautionary counterarguments — ensuring the briefing surfaces risk angles alongside optimistic narratives.
 
 ---
 
@@ -371,12 +400,16 @@ betterwiser_briefs_agent/
 │
 ├── src/
 │   ├── orchestrator.py            ← CLI entry point
-│   ├── schemas.py                 ← All Pydantic v2 data models
+│   ├── schemas.py                 ← All Pydantic v2 data models (incl. SynthesisDraft)
 │   ├── gatherers/                 ← Phase 0 + Phase 2 data gathering
 │   │   ├── profile_updater.py     ← Phase 0: LinkedIn + web search context refresh
+│   │   └── rss_reader.py          ← Sub-pipeline F: RSS/Atom feed ingestion
 │   ├── synthesis/                 ← Phase 3: 6-pass synthesis
+│   │   └── pass_cross_track.py    ← Post-synthesis cross-track entity annotation
 │   ├── delivery/                  ← Phase 5: archive + email
 │   └── utils/                     ← Shared helpers
+│       ├── trend_db.py            ← Persistent entity mention tracker (JSON)
+│       └── wayback.py             ← CDX API verification for dead-link fallbacks
 │
 ├── runs/                          ← Output (auto-created)
 │   └── 2026-03_run_20260301T080000/
@@ -398,14 +431,26 @@ betterwiser_briefs_agent/
 ## Quality Safeguards
 
 ```
-Layer 1: CITATIONS         Every claim must be traceable to a
-──────────────────         scraped source (Anthropic Citations API)
+Layer 1: STRUCTURED CONTRACTS   Pass 2 returns a typed SynthesisDraft
+─────────────────────────────   (Pydantic v2). Raw HTML is never the
+                                inter-pass communication medium.
+                                Tool use forces validated JSON output.
 
-Layer 2: GROUNDING         95%+ of claims must fuzzy-match source
-──────────────────         text (configurable in briefing_config.yaml)
+Layer 2: CITATIONS              Every claim must be traceable to a
+──────────────────              scraped source (Anthropic Citations API).
+                                UNVERIFIED claims trigger a correction
+                                loop re-lookup before being flagged.
+                                PARTIAL claims reduce confidence (0.7x).
 
-Layer 3: HELD FOR REVIEW   Below 95% → saved to disk, NOT emailed,
-────────────────────────   flagged ⚠ in the dashboard for human review
+Layer 3: GROUNDING              95%+ of claims must fuzzy-match source
+──────────────────              text (configurable in briefing_config.yaml)
+
+Layer 4: HELD FOR REVIEW        Below 95% → saved to disk, NOT emailed,
+────────────────────────        flagged in the dashboard for human review
+
+Layer 5: LINK VERIFICATION      Dead links verified via Wayback CDX API
+──────────────────────────      before substituting archive fallback URLs.
+                                Only confirmed snapshots are used.
 ```
 
 ---
@@ -415,10 +460,12 @@ Layer 3: HELD FOR REVIEW   Below 95% → saved to disk, NOT emailed,
 | Component | Per Monthly Run |
 |-----------|----------------|
 | Claude Opus 4.6 (Pass 2 synthesis — 3 calls/run) | ~$4–6 |
-| Claude Sonnet 4.6 (research, factcheck, discovery — 80–110 calls/run) | ~$2–4 |
-| Claude web searches (150–255) | ~$1.50–2.55 |
+| Claude Sonnet 4.6 (research, factcheck, discovery — 85–120 calls/run) | ~$2–4 |
+| Claude web searches (160–270 incl. Wave 7 contrarian) | ~$1.60–2.70 |
 | Phase 0: context update (~5 queries) | ~$0.05 |
 | Tavily deep research | ~$0.50–1.00 |
+| RSS feeds | Free |
+| Wayback CDX API | Free |
 | Jina Reader | Free |
 | Spider API | ~$0.02 |
 | Microsoft Graph | Free |
@@ -427,4 +474,4 @@ Layer 3: HELD FOR REVIEW   Below 95% → saved to disk, NOT emailed,
 
 **Demo run cost:** under $0.10 total for all 3 tracks (Claude Haiku, no extended thinking, synthetic data only).
 
-> **Two-model savings:** Opus is used only for Pass 2 (3 calls/run — one per track). All other ~80–110 calls use Sonnet 4.6 at ~5× lower cost. Estimated saving vs. Opus-only: 50–60% (~$9–10/month).
+> **Two-model savings:** Opus is used only for Pass 2 (3 calls/run — one per track). All other ~85–120 calls use Sonnet 4.6 at ~5× lower cost. Estimated saving vs. Opus-only: 50–60% (~$9–10/month).

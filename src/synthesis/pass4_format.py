@@ -6,6 +6,9 @@ Takes the grounded synthesis and produces:
 2. Validated links (HEAD requests; Wayback Machine fallback for dead links)
 3. Final ValidatedBriefing ready for delivery
 
+Primary path: deterministic rendering from SynthesisDraft (structured data).
+Fallback path: normalise raw_html from Claude's freeform output when draft is absent.
+
 Input:  SynthesisResult + GroundingReport
 Output: ValidatedBriefing
 """
@@ -15,24 +18,34 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from pathlib import Path
+from html import escape
 from typing import Optional
 
 import httpx
 
 from src.schemas import (
+    BriefingItem,
     BriefingTrack,
+    DraftBriefingItem,
+    DraftSection,
     GroundingReport,
     LinkCheckResult,
+    SourceTier,
+    SynthesisDraft,
     SynthesisResult,
     ValidatedBriefing,
 )
+from src.utils.wayback import batch_verify as _wayback_batch_verify
 
 logger = logging.getLogger(__name__)
 
 # Email brand colours
 BW_NAVY = "#1B2A4A"
 BW_TEAL = "#00B4C8"
+BW_ORANGE = "#C87800"
+
+# Feedback mailto — recipients can reply with a structured subject line
+_FEEDBACK_MAILTO = "ai-briefing@betterwiser.com"
 
 
 async def format_and_validate(
@@ -55,15 +68,31 @@ async def format_and_validate(
     """
     track = synthesis.track
 
-    # Validate all links found in the HTML
-    urls_in_html = _extract_urls_from_html(synthesis.raw_html)
+    # ------------------------------------------------------------------ #
+    # Primary path: render deterministically from SynthesisDraft          #
+    # ------------------------------------------------------------------ #
+    if synthesis.draft is not None:
+        logger.info(
+            f"Track {track.value}: Pass 4 — rendering from structured draft "
+            f"({sum(len(s.items) for s in synthesis.draft.sections)} items)"
+        )
+        content_html = _format_from_draft(synthesis.draft)
+        source_count = synthesis.draft.total_sources_used
+    else:
+        # ------------------------------------------------------------------ #
+        # Fallback path: normalise freeform raw_html                         #
+        # ------------------------------------------------------------------ #
+        logger.info(f"Track {track.value}: Pass 4 — rendering from raw_html (draft unavailable)")
+        content_html = synthesis.raw_html
+        source_count = 0
+
+    # Validate all links found in the generated HTML
+    urls_in_html = _extract_urls_from_html(content_html)
     logger.info(f"Track {track.value}: Pass 4 — validating {len(urls_in_html)} links")
     link_results = await _validate_links(urls_in_html)
 
-    # Check that every briefing entry carries at least one citation URL.
-    # Entries without citations are logged as warnings and annotated in the HTML
-    # so reviewers can spot and fix them before the briefing is sent.
-    html_with_citations, uncited_count = _enforce_citation_coverage(synthesis.raw_html, urls_in_html)
+    # Check citation coverage (warn on missing source links)
+    html_with_citations, uncited_count = _enforce_citation_coverage(content_html, urls_in_html)
     if uncited_count:
         logger.warning(
             f"Track {track.value}: {uncited_count} entry/entries appear to have no "
@@ -72,10 +101,11 @@ async def format_and_validate(
     else:
         logger.info(f"Track {track.value}: citation coverage check passed")
 
-    # Build map of dead URL → Wayback fallback
-    url_replacements = _build_url_replacements(link_results)
+    # Verify dead links have actual Wayback snapshots before substituting
+    await _resolve_wayback_fallbacks(link_results)
 
-    # Apply URL replacements to the HTML
+    # Build map of dead URL → verified Wayback snapshot URL and apply
+    url_replacements = _build_url_replacements(link_results)
     html_with_valid_links = _replace_dead_links(html_with_citations, url_replacements)
 
     # Wrap in BetterWiser email template
@@ -92,7 +122,8 @@ async def format_and_validate(
         track=track,
         month_human=month_human,
         track_name=track_name,
-        source_count=len(urls_in_html),
+        source_count=source_count if source_count else len(urls_in_html),
+        month=month,
     )
 
     held_for_review = grounding_report.below_threshold
@@ -179,14 +210,26 @@ async def _check_single_url(url: str, timeout: float) -> LinkCheckResult:
         return LinkCheckResult(url=url, reachable=False, error=str(e)[:100])
 
 
-def _wayback_url(url: str) -> str:
-    """Generate a Wayback Machine fallback URL for a dead link."""
-    # Use /web/2/ to redirect to the most recent archived snapshot
-    return f"https://web.archive.org/web/2/{url}"
+async def _resolve_wayback_fallbacks(link_results: list[LinkCheckResult]) -> None:
+    """
+    Replace speculative /web/2/<url> fallbacks with CDX-verified snapshot URLs.
+
+    Mutates link_results in-place: sets wayback_fallback to the verified
+    snapshot URL, or clears it to None if no snapshot exists in the archive.
+    """
+    dead = [r for r in link_results if not r.reachable]
+    if not dead:
+        return
+
+    dead_urls = [r.url for r in dead]
+    verified = await _wayback_batch_verify(dead_urls)
+
+    for result in dead:
+        result.wayback_fallback = verified.get(result.url)
 
 
 def _build_url_replacements(link_results: list[LinkCheckResult]) -> dict[str, str]:
-    """Build a dict of dead URL → replacement URL."""
+    """Build a dict of dead URL → verified Wayback snapshot URL."""
     replacements = {}
     for result in link_results:
         if not result.reachable and result.wayback_fallback:
@@ -216,12 +259,35 @@ def _extract_urls_from_html(html: str) -> list[str]:
     return result
 
 
+def _build_feedback_links(track: BriefingTrack, month: str) -> tuple[str, str, str]:
+    """
+    Build mailto: links for the footer feedback row.
+
+    Returns (useful_href, not_useful_href, correction_href).
+    The reader's email client opens a pre-addressed message with a subject line
+    the inbox reader can parse for feedback aggregation.
+    """
+    import urllib.parse
+    base = f"mailto:{_FEEDBACK_MAILTO}"
+    tag = f"Track {track.value} {month}"
+
+    def _mailto(subject: str) -> str:
+        return f"{base}?subject={urllib.parse.quote(subject)}"
+
+    return (
+        _mailto(f"[FEEDBACK] Useful — {tag}"),
+        _mailto(f"[FEEDBACK] Not useful — {tag}"),
+        _mailto(f"[FEEDBACK] Error — {tag}"),
+    )
+
+
 def _wrap_in_email_template(
     content_html: str,
     track: BriefingTrack,
     month_human: str,
     track_name: str,
     source_count: int = 0,
+    month: str = "",
 ) -> str:
     """
     Wrap the briefing content in a BetterWiser-branded Outlook-compatible HTML template.
@@ -242,6 +308,11 @@ def _wrap_in_email_template(
         source_note = "1 source cited"
     else:
         source_note = "generated from web sources"
+
+    # Feedback mailto links
+    feedback_useful, feedback_not_useful, feedback_correction = _build_feedback_links(
+        track, month or month_human
+    )
 
     # Graceful fallback when synthesis produced nothing
     if content_html.strip():
@@ -323,10 +394,19 @@ def _wrap_in_email_template(
   <!-- Footer -->
   <tr>
     <td style="background-color:{BW_NAVY};padding:16px 36px;border-top:2px solid {BW_TEAL};">
-      <p style="margin:0;font-size:11px;color:#7A8AA0;font-family:Calibri,Arial,sans-serif;line-height:1.5;">
+      <p style="margin:0 0 8px 0;font-size:11px;color:#7A8AA0;font-family:Calibri,Arial,sans-serif;line-height:1.5;">
         BetterWiser Legal Intelligence &nbsp;·&nbsp; {month_human} &nbsp;·&nbsp;
         Generated automatically — verify before external use.
         &nbsp;·&nbsp; BetterWiser Pte. Ltd., Singapore
+      </p>
+      <p style="margin:0;font-size:11px;color:#7A8AA0;font-family:Calibri,Arial,sans-serif;line-height:1.8;">
+        Feedback:
+        &nbsp;
+        <a href="{feedback_useful}" style="color:{BW_TEAL};text-decoration:none;">Useful</a>
+        &nbsp;·&nbsp;
+        <a href="{feedback_not_useful}" style="color:{BW_TEAL};text-decoration:none;">Not useful</a>
+        &nbsp;·&nbsp;
+        <a href="{feedback_correction}" style="color:{BW_TEAL};text-decoration:none;">Report an error</a>
       </p>
     </td>
   </tr>
@@ -337,6 +417,103 @@ def _wrap_in_email_template(
 
 </body>
 </html>"""
+
+
+def _format_from_draft(draft: SynthesisDraft) -> str:
+    """
+    Deterministically render a SynthesisDraft to HTML.
+
+    Produces clean, structured HTML that requires only inline-style injection by
+    _normalise_content_html — no regex cleanup of freeform Claude output needed.
+    All values are HTML-escaped at the point of insertion.
+    """
+    parts: list[str] = []
+
+    # Optional hot vendor callout (Track A)
+    if draft.hot_vendor:
+        hv = escape(draft.hot_vendor)
+        parts.append(
+            f'<p><strong>Vendor to Watch:</strong> {hv}</p>'
+        )
+
+    for section in draft.sections:
+        # Section heading
+        heading = escape(section.heading)
+        if section.eyebrow:
+            eyebrow = escape(section.eyebrow)
+            parts.append(f'<h3>{eyebrow}</h3>')
+        parts.append(f'<h2>{heading}</h2>')
+
+        # Section-level BW relevance (Track C)
+        if section.section_relevance:
+            rel = escape(section.section_relevance)
+            parts.append(
+                f'<p><strong>Relevance to BetterWiser:</strong> {rel}</p>'
+            )
+
+        # Items as an unordered list
+        parts.append('<ul>')
+        for item in section.items:
+            # Skip items that completely failed fact-checking
+            if not item.verified and item.confidence == 0.0:
+                continue
+
+            parts.append('<li>')
+
+            # Heading + optional date
+            item_heading = escape(item.heading)
+            if item.date_str:
+                date = escape(item.date_str)
+                parts.append(f'<strong>{item_heading}</strong> <span>({date})</span>')
+            else:
+                parts.append(f'<strong>{item_heading}</strong>')
+
+            # Summary
+            if item.summary:
+                summary = escape(item.summary)
+                parts.append(f'<br>{summary}')
+
+            # Source link
+            if item.source_url:
+                url = item.source_url  # URLs not escaped — they go in href attr
+                name = escape(item.source_name or _domain_from_url(item.source_url))
+                parts.append(
+                    f' <a href="{url}">[{name}]</a>'
+                )
+
+            # Low-confidence annotation
+            if not item.verified or item.confidence < 0.7:
+                parts.append(
+                    '<span style="color:#856404;font-size:11px;margin-left:6px;">'
+                    '&#9888; Partially verified</span>'
+                )
+
+            # Track C: opinion takeaway
+            if item.opinion_takeaway:
+                ot = escape(item.opinion_takeaway)
+                parts.append(
+                    f'<br><em><strong>Opinion Takeaway:</strong> {ot}</em>'
+                )
+
+            # Track C: BW relevance
+            if item.betterwiser_relevance:
+                bwr = escape(item.betterwiser_relevance)
+                parts.append(
+                    f'<br><strong>Relevance to BetterWiser:</strong> {bwr}'
+                )
+
+            parts.append('</li>')
+
+        parts.append('</ul>')
+
+    return '\n'.join(parts)
+
+
+def _domain_from_url(url: str) -> str:
+    """Extract a readable domain name from a URL for use as link text."""
+    import re as _re
+    m = _re.match(r"https?://(?:www\.)?([^/]+)", url)
+    return m.group(1) if m else url[:40]
 
 
 def _normalise_content_html(html: str) -> str:

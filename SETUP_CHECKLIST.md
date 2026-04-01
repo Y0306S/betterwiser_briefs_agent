@@ -15,6 +15,7 @@ MINIMUM — verify pipeline works (demo run):
 MINIMUM — generate real briefings saved to disk:
   ✅ Python 3.12 environment
   ✅ Anthropic API key  (~$8–14/month in API costs)
+  (RSS feeds and Wayback CDX link verification are free, no key needed)
 
 TO READ NEWSLETTERS FROM INBOX + SEND EMAIL:
   + Microsoft Azure AD app registration (free setup)
@@ -88,7 +89,8 @@ python -m playwright install chromium --with-deps
 
 1. In the Anthropic Console → **Billing** → add a payment method
 2. Set a monthly **usage limit** of $30 as a safety cap
-   (Actual usage: ~$8–14/month for all 3 tracks with the two-model strategy)
+   (Actual usage: ~$8–14/month for all 3 tracks with the two-model strategy;
+   RSS and Wayback CDX API calls are free and not billed here)
 
 ### 2.3 Create your .env file
 
@@ -235,6 +237,8 @@ Subscribe `ai-briefing@betterwiser.com` to these newsletters:
 | ALITA | alita.asia |
 
 (~15 minutes. The agent works without inbox access — newsletters improve quality but are not required.)
+
+> **RSS feeds are configured separately** — they are fetched automatically via `config/briefing_config.yaml` under `rss_feeds` and require no inbox subscription. The 9 pre-configured feeds (Artificial Lawyer, LawNext, Legal Futures, PDPC, MAS, MinLaw, etc.) are active by default.
 
 ---
 
@@ -387,7 +391,7 @@ The dashboard already listens on `0.0.0.0:5000`, so anyone on the same WiFi can 
 - [ ] `python -m playwright install chromium --with-deps` done
 - [ ] `.env` created from `.env.example`
 - [ ] `ANTHROPIC_API_KEY` set in `.env`
-- [ ] Anthropic billing configured with $50 cap
+- [ ] Anthropic billing configured with $30 cap
 - [ ] **Demo run passes:** `python demo_run.py` → all 3 tracks show `[PASS]`
 - [ ] Demo HTML opens in browser (`runs\..._DEMO_...\delivery\track_A.html`)
 
@@ -423,5 +427,5 @@ The dashboard already listens on `0.0.0.0:5000`, so anyone on the same WiFi can 
 | Track shown as ⚠ (held for review) | Grounding below 95% — open the HTML to review manually |
 | Playwright error | Run `python -m playwright install chromium --with-deps` |
 | Demo run takes > 5 min | Check for API rate limiting — Haiku calls should complete quickly |
-| Full run takes 30+ min | Normal for Track C (6-wave deep research). A+B take ~10 min |
+| Full run takes 30+ min | Normal for Track C (7-wave deep research incl. Wave 7 contrarian). A+B take ~10 min |
 | GitHub Actions run fails | Check the run logs in the Actions tab; most issues are missing secrets |

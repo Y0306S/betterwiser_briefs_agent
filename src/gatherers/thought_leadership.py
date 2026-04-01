@@ -1,7 +1,7 @@
 """
 Track C thought leadership deep research — Phase 2, Sub-pipeline D.
 
-Runs 6 sequential waves maximising unique thought leadership sources:
+Runs 7 sequential waves maximising unique thought leadership sources:
 
   Wave 1 — Newsletter extraction + dynamic watchlist building
   Wave 2 — Person-specific deep search (4+ searches per person)
@@ -9,8 +9,9 @@ Runs 6 sequential waves maximising unique thought leadership sources:
   Wave 4 — Tavily deep research (thematic queries)
   Wave 5 — Semantic similarity expansion (top 5-10 articles)
   Wave 6 — Conference/event speaker mining
+  Wave 7 — Contrarian/critical perspective search (balances dominant consensus)
 
-Estimated: 80–150 web searches + 50–100 additional pages per run.
+Estimated: 90–170 web searches + 50–100 additional pages per run.
 Cost is NOT a constraint — exhaust all waves.
 """
 
@@ -147,9 +148,15 @@ async def run_waves(
         bonus_articles = await _wave2_person_search(speaker_persons, month, client, model_id)
         add_articles(bonus_articles, wave=6)
 
+    # Wave 7: Contrarian / critical perspective search
+    logger.info("Wave 7: Contrarian and critical perspective search")
+    w7_articles = await _wave7_contrarian_search(all_articles, month, client, model_id)
+    add_articles(w7_articles, wave=7)
+    logger.info(f"Wave 7: {len(w7_articles)} contrarian/critical articles")
+
     logger.info(
         f"Thought leadership research complete: {len(all_articles)} unique articles "
-        f"across 6 waves"
+        f"across 7 waves"
     )
     return all_articles
 
@@ -544,6 +551,137 @@ async def _wave6_conference_mining(
             logger.debug(f"Wave 6 conference mining failed for {conf_name}: {e}")
 
     return articles, list(set(new_speaker_names))
+
+
+@async_retry(max_attempts=2, base_delay=1.0)
+async def _wave7_contrarian_search(
+    existing_articles: list[DiscoveredArticle],
+    month: str,
+    client: anthropic.AsyncAnthropic,
+    model_id: str,
+) -> list[DiscoveredArticle]:
+    """
+    Wave 7: Actively seek critical, sceptical, and dissenting perspectives.
+
+    Identifies the 3 dominant themes from articles gathered so far, then runs
+    targeted searches for counterarguments, critiques, and cautionary takes.
+    This prevents the briefing from being an echo-chamber of AI optimism and
+    surfaces risk/challenge angles that BetterWiser clients need to weigh.
+    """
+    if not existing_articles:
+        return []
+
+    articles: list[DiscoveredArticle] = []
+    seen_urls = {a.url for a in existing_articles}
+
+    # Step 1: Ask Claude to identify the dominant consensus themes from collected snippets
+    snippet_digest = "\n".join(
+        f"- {a.title}: {a.snippet[:150]}"
+        for a in existing_articles[:40]
+        if a.snippet
+    )
+
+    if not snippet_digest.strip():
+        return []
+
+    try:
+        theme_response = await client.messages.create(
+            model=model_id,
+            max_tokens=512,
+            system=(
+                "You are identifying the 3 most dominant consensus themes "
+                "in a set of legal AI thought leadership articles."
+            ),
+            messages=[{
+                "role": "user",
+                "content": (
+                    f"From these article titles and snippets ({_month_human(month)}), "
+                    f"identify the 3 most-repeated consensus claims or optimistic narratives "
+                    f"that critical voices might push back against.\n\n"
+                    f"{snippet_digest}\n\n"
+                    f"Return as JSON array of 3 short theme strings: "
+                    f'["theme 1", "theme 2", "theme 3"]'
+                ),
+            }],
+        )
+        themes = _parse_article_array(_extract_text(theme_response))
+        # Themes come back as strings not dicts — handle that
+        import json as _json
+        raw_text = _extract_text(theme_response)
+        start = raw_text.find("[")
+        end = raw_text.rfind("]")
+        if start != -1 and end != -1:
+            try:
+                parsed_themes = _json.loads(raw_text[start:end+1])
+                if isinstance(parsed_themes, list):
+                    themes = [str(t) for t in parsed_themes if t][:3]
+                else:
+                    themes = []
+            except (ValueError, KeyError):
+                themes = []
+        else:
+            themes = []
+    except Exception as e:
+        logger.debug(f"Wave 7 theme extraction failed: {e}")
+        themes = []
+
+    # Fallback themes if extraction failed
+    if not themes:
+        themes = [
+            "AI replacing legal jobs",
+            "generative AI accuracy in legal research",
+            "AI governance and regulatory compliance",
+        ]
+
+    # Step 2: For each theme, search for critical / sceptical perspectives
+    contrarian_queries = []
+    for theme in themes[:3]:
+        contrarian_queries.extend([
+            f'criticism OR risks OR challenges OR "not ready" "{theme}" legal {month[:4]}',
+            f'"overhyped" OR "cautionary" OR sceptical "{theme}" legal AI',
+        ])
+
+    for query in contrarian_queries[:6]:  # cap at 6 searches to manage cost
+        try:
+            response = await client.messages.create(
+                model=model_id,
+                max_tokens=1024,
+                tools=[WEB_SEARCH_TOOL],
+                system=(
+                    "You are finding critical, sceptical, and cautionary perspectives "
+                    "on legal AI adoption. Prioritise articles that challenge dominant narratives, "
+                    "highlight risks, or argue for slower/more-careful adoption."
+                ),
+                messages=[{
+                    "role": "user",
+                    "content": (
+                        f"Search: {query}\n"
+                        f"Return JSON array of articles with critical or sceptical viewpoints: "
+                        f"[{{\"url\", \"title\", \"snippet\", \"source_name\", \"published_date\"}}]. "
+                        f"Return ONLY valid JSON."
+                    ),
+                }],
+            )
+
+            for item in _parse_article_array(_extract_text(response)):
+                url = item.get("url", "")
+                if url and url not in seen_urls and url.startswith(("http://", "https://")):
+                    seen_urls.add(url)
+                    articles.append(DiscoveredArticle(
+                        url=url,
+                        title=item.get("title", ""),
+                        snippet=item.get("snippet", ""),
+                        source_name=item.get("source_name", ""),
+                        published_date=item.get("published_date"),
+                        track=BriefingTrack.C,
+                        tier=classify_url(url),
+                        discovered_via="claude_web_search",
+                    ))
+
+        except Exception as e:
+            logger.debug(f"Wave 7 contrarian search failed for '{query[:60]}': {e}")
+
+    return articles
 
 
 # ---------------------------------------------------------------------------

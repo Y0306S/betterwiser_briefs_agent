@@ -195,11 +195,61 @@ class ThemeGroup(BaseModel):
     betterwiser_relevance: str           # section-level BW relevance note
 
 
+class DraftBriefingItem(BaseModel):
+    """
+    A single structured entry produced by Pass 2 via tool use.
+    Passed through Passes 3, 3.5, and 4 without ever being serialised to HTML
+    until Pass 4 renders it deterministically.
+    """
+    heading: str                              # Bold title / key claim (≤ 12 words)
+    date_str: Optional[str] = None            # "On 15 March 2026" — day-month-year
+    summary: str                              # 1–2 factual sentences
+    source_url: str                           # Exact URL copied from source document
+    source_name: Optional[str] = None         # Publication / site name
+    # Track C only
+    opinion_takeaway: Optional[str] = None    # 2–3 sentences: why this matters
+    betterwiser_relevance: Optional[str] = None  # specific BW service-line connection
+    # Set by Pass 3
+    confidence: float = 1.0                  # 0.0–1.0; reduced when PARTIAL verified
+    verified: bool = True                    # False if UNVERIFIED after correction attempt
+    correction_note: Optional[str] = None    # What was corrected in Pass 3
+
+    @field_validator("source_url")
+    @classmethod
+    def validate_source_url(cls, v: str) -> str:
+        if v and not v.startswith(("http://", "https://")):
+            raise ValueError(f"source_url must be http(s), got: {v!r}")
+        return v
+
+
+class DraftSection(BaseModel):
+    """A thematic section, grouping 2–4 DraftBriefingItems."""
+    heading: str                              # Section title (e.g. "(i) Vendor Updates")
+    eyebrow: Optional[str] = None             # Track C: "Theme 01" upper-label
+    items: list[DraftBriefingItem]
+    section_relevance: Optional[str] = None  # Track C: BW relevance at section level
+
+
+class SynthesisDraft(BaseModel):
+    """
+    Structured output from Pass 2 (tool use).  This is the canonical
+    inter-pass data contract — all downstream passes (3, 3.5, 4) consume
+    this model instead of parsing raw HTML.
+    """
+    track: BriefingTrack
+    sections: list[DraftSection]
+    hot_vendor: Optional[str] = None          # Track A: emerging vendor worth watching
+    editorial_notes: Optional[str] = None     # Parsed from Opus thinking block
+    uncertainty_flags: list[str] = Field(default_factory=list)  # Opus-flagged weak claims
+    total_sources_used: int = 0
+
+
 class SynthesisResult(BaseModel):
     """Output of the 6-pass synthesis pipeline for one track."""
     run_id: str
     track: BriefingTrack
-    raw_html: str                        # Claude's raw HTML output from Pass 2
+    raw_html: str                        # Fallback: Claude's raw text if tool use fails
+    draft: Optional[SynthesisDraft] = None  # Primary: structured output from Pass 2
     items: list[BriefingItem] = Field(default_factory=list)
     theme_groups: list[ThemeGroup] = Field(default_factory=list)  # Track C only
     thinking_summary: Optional[str] = None  # extended thinking block
