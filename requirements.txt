@@ -2,7 +2,7 @@
 flask>=3.0.0,<4.0.0
 
 # Core AI / cloud
-anthropic>=1.0.0,<2.0.0
+anthropic
 azure-identity>=1.15.0,<2.0.0
 msgraph-sdk>=1.2.0,<2.0.0
 
