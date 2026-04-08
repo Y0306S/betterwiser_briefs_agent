@@ -197,6 +197,7 @@ def _parse_rss(
 ) -> list[DiscoveredArticle]:
     """Parse RSS 2.0 <item> elements."""
     articles: list[DiscoveredArticle] = []
+    dateless_count: list[int] = []  # shared counter per feed
 
     # Use channel title as source_name fallback
     if not source_name:
@@ -222,7 +223,7 @@ def _parse_rss(
         pub_date_str = (pubdate_el.text or "").strip() if pubdate_el is not None else ""
         published_date = _parse_rss_date(pub_date_str)
 
-        if not _is_in_month(published_date, month):
+        if not _is_in_month(published_date, month, tier=tier, dateless_count=dateless_count):
             continue
 
         articles.append(DiscoveredArticle(
@@ -230,7 +231,7 @@ def _parse_rss(
             title=title,
             snippet=snippet,
             source_name=source_name,
-            published_date=published_date,
+            published_date=published_date or "unknown",
             track=track,
             tier=tier,
             discovered_via="rss",
@@ -248,6 +249,7 @@ def _parse_atom(
 ) -> list[DiscoveredArticle]:
     """Parse Atom 1.0 <entry> elements."""
     articles: list[DiscoveredArticle] = []
+    dateless_count: list[int] = []  # shared counter per feed
 
     # Strip namespace prefix from all tags for uniform access
     def _detag(el: ET.Element) -> str:
@@ -292,7 +294,7 @@ def _parse_atom(
         if not url or not url.startswith(("http://", "https://")):
             continue
 
-        if not _is_in_month(published_date, month):
+        if not _is_in_month(published_date, month, tier=tier, dateless_count=dateless_count):
             continue
 
         articles.append(DiscoveredArticle(
@@ -300,7 +302,7 @@ def _parse_atom(
             title=title,
             snippet=snippet,
             source_name=source_name,
-            published_date=published_date,
+            published_date=published_date or "unknown",
             track=track,
             tier=tier,
             discovered_via="rss",
@@ -324,15 +326,33 @@ def _parse_rss_date(date_str: str) -> Optional[str]:
             return None
 
 
-def _is_in_month(date_str: Optional[str], month: str) -> bool:
+def _is_in_month(
+    date_str: Optional[str],
+    month: str,
+    tier: Optional[SourceTier] = None,
+    dateless_count: Optional[list] = None,
+    dateless_cap: int = 3,
+) -> bool:
     """
     Return True if date_str falls within the target month.
 
-    If date_str is None (unparseable), return True so we don't silently
-    drop entries just because they lack a pub date.
+    If date_str is None (unparseable pub date):
+    - For tier_1 / tier_2 sources: allow up to dateless_cap articles per feed
+      (high-trust sources rarely have wrong dates — usually a transient parse issue).
+    - For tier_3 or unknown tier: reject — old content from broken feeds is noise.
+
+    Pass a mutable list as dateless_count to track the per-feed count.
     """
     if date_str is None:
-        return True
+        high_trust = tier in (SourceTier.TIER_1, SourceTier.TIER_2)
+        if not high_trust:
+            return False  # tier_3 / unknown: drop undated articles
+        if dateless_count is None:
+            return True  # no tracking requested — allow (legacy compat)
+        if len(dateless_count) < dateless_cap:
+            dateless_count.append(1)
+            return True
+        return False  # cap exceeded even for high-trust feeds
     # date_str should be "YYYY-MM-DD" at this point
     return date_str.startswith(month)
 

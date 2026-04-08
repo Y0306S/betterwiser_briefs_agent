@@ -10,6 +10,7 @@ Estimated: 40–60 searches across all three tracks per run.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from datetime import datetime
@@ -19,6 +20,7 @@ import anthropic
 
 from src.schemas import BriefingTrack, DiscoveredArticle, SourceTier
 from src.utils.authority import classify_url
+from src.utils.json_extractor import extract_json_array
 from src.utils.retry import async_retry
 
 logger = logging.getLogger(__name__)
@@ -35,7 +37,7 @@ async def discover_articles_all_tracks(
     month: str,
     queries_by_track: dict[str, list[str]],
     client: anthropic.AsyncAnthropic,
-    model_id: str = "claude-opus-4-6",
+    model_id: str = "claude-sonnet-4-6",
 ) -> list[DiscoveredArticle]:
     """
     Run discovery searches for all specified tracks.
@@ -77,27 +79,32 @@ async def _search_for_track(
     track: BriefingTrack,
     client: anthropic.AsyncAnthropic,
     model_id: str,
+    concurrency: int = 4,
 ) -> list[DiscoveredArticle]:
-    """Run all queries for a single track and return discovered articles."""
+    """Run all queries for a single track in parallel and return discovered articles."""
+    system_prompt = _get_discovery_system_prompt(track)
+    semaphore = asyncio.Semaphore(concurrency)
+
+    async def run_one(query: str) -> list[DiscoveredArticle]:
+        async with semaphore:
+            try:
+                return await _run_single_query_with_retry(
+                    query, track, system_prompt, client, model_id
+                )
+            except Exception as e:
+                logger.warning(f"Discovery query failed for Track {track.value}: '{query}': {e}")
+                return []
+
+    results = await asyncio.gather(*[run_one(q) for q in queries])
+
+    # Deduplicate by URL across all parallel results
     all_articles: list[DiscoveredArticle] = []
     seen_urls: set[str] = set()
-
-    system_prompt = _get_discovery_system_prompt(track)
-
-    for query in queries:
-        try:
-            # Retry at per-query level so a failure in one query doesn't
-            # restart all queries from scratch.
-            articles = await _run_single_query_with_retry(
-                query, track, system_prompt, client, model_id
-            )
-            for article in articles:
-                if article.url not in seen_urls:
-                    seen_urls.add(article.url)
-                    all_articles.append(article)
-        except Exception as e:
-            logger.warning(f"Discovery query failed for Track {track.value}: '{query}': {e}")
-            continue
+    for batch in results:
+        for article in batch:
+            if article.url not in seen_urls:
+                seen_urls.add(article.url)
+                all_articles.append(article)
 
     return all_articles
 
@@ -139,6 +146,7 @@ async def _run_single_query(
     response = await client.messages.create(
         model=model_id,
         max_tokens=2048,
+        temperature=0.6,
         tools=[WEB_SEARCH_TOOL],
         system=system_prompt,
         messages=messages,
@@ -165,46 +173,42 @@ def _extract_articles_from_response(
     if not full_text.strip():
         return []
 
-    # Try to parse JSON array from the response
-    try:
-        import json
-        # Find the first complete JSON array. Use rfind to locate the matching
-        # closing bracket for the first '[', avoiding greedy over-matching when
-        # the model outputs explanation text before or after the JSON.
-        start = full_text.find("[")
-        end = full_text.rfind("]")
-        json_match = (start != -1 and end != -1 and end > start)
-        if json_match:
-            raw_items = json.loads(full_text[start : end + 1])
-            for item in raw_items:
-                if not isinstance(item, dict):
-                    continue
-                url = item.get("url", "")
-                title = item.get("title", "")
-                snippet = item.get("snippet", "")
-                source_name = item.get("source_name", "")
-                published_date = item.get("published_date")
+    raw_items = extract_json_array(full_text)
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        url = item.get("url", "")
+        title = item.get("title", "")
+        snippet = item.get("snippet", "")
+        source_name = item.get("source_name", "")
+        published_date = item.get("published_date")
 
-                if not url or not url.startswith(("http://", "https://")):
-                    continue
-                if not title:
-                    continue
+        if not url or not url.startswith(("http://", "https://")):
+            continue
+        if not title:
+            continue
 
-                tier = classify_url(url)
-                articles.append(DiscoveredArticle(
-                    url=url,
-                    title=title,
-                    snippet=snippet or title,
-                    source_name=source_name or _extract_domain(url),
-                    published_date=published_date,
-                    track=track,
-                    tier=tier,
-                    discovered_via="claude_web_search",
-                ))
-    except (ValueError, KeyError) as e:
-        logger.debug(f"Could not parse JSON from discovery response: {e}. Raw: {full_text[:200]}")
+        tier = classify_url(url)
+        articles.append(DiscoveredArticle(
+            url=url,
+            title=title,
+            snippet=snippet or title,
+            source_name=source_name or _extract_domain(url),
+            published_date=published_date,
+            track=track,
+            tier=tier,
+            discovered_via="claude_web_search",
+        ))
 
     return articles
+
+
+_JSON_FORMAT_INSTRUCTION = (
+    "\n\nAlways return results as a JSON array with no text before or after it: "
+    '[{"url": "...", "title": "...", "snippet": "...", "source_name": "...", '
+    '"published_date": "YYYY-MM-DD or null"}]. '
+    "Only include articles with real, working URLs."
+)
 
 
 def _get_discovery_system_prompt(track: BriefingTrack) -> str:
@@ -226,7 +230,8 @@ def _get_discovery_system_prompt(track: BriefingTrack) -> str:
             "AI adoption in professional services. Prioritise named authors and major firms."
         ),
     }
-    return prompts.get(track, "You are a research assistant. Find recent, relevant articles.")
+    base = prompts.get(track, "You are a research assistant. Find recent, relevant articles.")
+    return base + _JSON_FORMAT_INSTRUCTION
 
 
 def _parameterise_query(query_template: str, month: str) -> str:

@@ -296,14 +296,20 @@ async def _run_pipeline(
     # ---------------------------------------------------------------------------
     logger.info(f"Phase 3: Synthesising {len(tracks)} tracks")
 
-    synthesis_tasks = [
-        _synthesise_track(
-            track, gathered, config, claude,
-            synthesis_model_config, research_model_config,
-            resume_path,
-        )
-        for track in tracks
-    ]
+    # Limit concurrent Opus synthesis calls to avoid rate limit errors.
+    # Two concurrent tracks is the safe default; all 3 simultaneously
+    # can exhaust per-minute token quotas on most accounts.
+    synthesis_semaphore = asyncio.Semaphore(2)
+
+    async def _gated_synthesise(track: BriefingTrack) -> ValidatedBriefing:
+        async with synthesis_semaphore:
+            return await _synthesise_track(
+                track, gathered, config, claude,
+                synthesis_model_config, research_model_config,
+                resume_path,
+            )
+
+    synthesis_tasks = [_gated_synthesise(t) for t in tracks]
     synthesis_results = await asyncio.gather(*synthesis_tasks, return_exceptions=True)
 
     # ---------------------------------------------------------------------------
@@ -427,18 +433,38 @@ async def _gather_phase(
 
     start_time = datetime.now(tz=timezone.utc)
 
-    # Run all 6 sub-pipelines concurrently
-    # return_exceptions=True ensures one failure doesn't kill everything
+    # ---------------------------------------------------------------------------
+    # Stage A: Fast, non-AI parallel sub-pipelines (inbox, scraping, RSS, history)
+    # These complete first so TL waves and discovery can use real email content.
+    # ---------------------------------------------------------------------------
     (
         email_result,
         scrape_result,
-        discover_result,
-        tl_result,
         history_result,
         rss_result,
     ) = await asyncio.gather(
         inbox_reader.read_inbox(month),                                      # A
         scrape_urls(curated_urls),                                           # B
+        asyncio.to_thread(history_loader.load_previous_month, run_context.runs_dir, month),  # E
+        read_feeds(rss_feed_configs, month),                                 # F (RSS feeds)
+        return_exceptions=True,
+    )
+
+    emails = _safe_list(email_result, "inbox reading")
+    scraped = _safe_list(scrape_result, "web scraping")
+    history = history_result if isinstance(history_result, str) else None
+    rss_articles = _safe_list(rss_result, "RSS feeds")
+
+    if rss_articles:
+        logger.info(f"RSS sub-pipeline: {len(rss_articles)} articles ingested")
+
+    # ---------------------------------------------------------------------------
+    # Stage B: AI-driven sub-pipelines — now have real emails for TL Wave 1
+    # ---------------------------------------------------------------------------
+    (
+        discover_result,
+        tl_result,
+    ) = await asyncio.gather(
         discovery.discover_articles_all_tracks(                              # C
             tracks=run_context.tracks,
             month=month,
@@ -449,58 +475,27 @@ async def _gather_phase(
         (
             thought_leadership.run_waves(                                    # D (Track C only)
                 month=month,
-                email_sources=[],  # will be populated after email_result
+                email_sources=emails,  # real emails available now
                 watchlist_config=watchlist_config,
                 client=claude,
                 model_id=model_id,
             ) if tl_in_tracks else asyncio.sleep(0, result=[])
         ),
-        asyncio.to_thread(history_loader.load_previous_month, run_context.runs_dir, month),  # E
-        read_feeds(rss_feed_configs, month),                                 # F (RSS feeds)
         return_exceptions=True,
     )
 
     duration = (datetime.now(tz=timezone.utc) - start_time).total_seconds()
 
-    # Unpack results, replacing exceptions with safe defaults
-    emails = _safe_list(email_result, "inbox reading")
-    scraped = _safe_list(scrape_result, "web scraping")
     discovered = _safe_list(discover_result, "Claude discovery")
     tl_articles = _safe_list(tl_result, "thought leadership research")
-    history = history_result if isinstance(history_result, str) else None
-    rss_articles = _safe_list(rss_result, "RSS feeds")
 
-    if rss_articles:
-        logger.info(f"RSS sub-pipeline: {len(rss_articles)} articles ingested")
-
-    # If inbox was available, supplement Wave 1 with actual email content.
-    # Only re-run Wave 1 (newsletter extraction) — NOT all 7 waves — to avoid
-    # doubling the entire TL research cost.
-    if emails and tl_in_tracks and not isinstance(tl_result, Exception):
-        logger.info("Supplementing thought leadership Wave 1 with actual email content")
-        try:
-            email_articles, _ = await _wave1_newsletter_extraction(
-                email_sources=emails,
-                month=month,
-                client=claude,
-                model_id=model_id,
-            )
-            existing_urls = {a.url for a in tl_articles}
-            new_articles = [a for a in email_articles if a.url not in existing_urls]
-            tl_articles.extend(new_articles)
-            logger.info(f"Wave 1 email supplement: {len(new_articles)} new articles added")
-        except Exception as e:
-            logger.warning(f"Email-augmented TL Wave 1 supplement failed: {e}")
-    else:
-        if not emails:
-            logger.info(
-                "No emails available — Track C thought leadership will rely on "
-                "web search waves (2–7) and Tavily only"
-            )
-        elif not tl_in_tracks:
-            logger.debug("Track C not selected — skipping email Wave 1 supplement")
-        else:
-            logger.debug("Track C thought leadership result unavailable — skipping email supplement")
+    if not emails:
+        logger.info(
+            "No emails available — Track C thought leadership relied on "
+            "web search waves (2–7) and Tavily only"
+        )
+    elif not tl_in_tracks:
+        logger.debug("Track C not selected — TL waves skipped")
 
     # Merge discovered + TL + RSS articles, deduplicating by URL
     _seen_urls: set[str] = set()
@@ -548,31 +543,52 @@ async def _post_discovery_scrape(
     """
     Scrape full content from the top discovered articles not already scraped.
 
-    Prioritises articles from higher tiers and longer snippets (as a proxy for
-    content quality).  Caps at 20 articles to keep latency bounded.
+    Budget is split evenly across active tracks so no single track monopolises
+    the scrape allocation (Track C's 7-wave research produces longer snippets
+    that would otherwise always win a global ranking).
+
+    Caps at post_discovery_scrape_max total articles across all tracks.
     """
     post_scrape_max = config.get("gathering", {}).get("post_discovery_scrape_max", 20)
     if post_scrape_max <= 0:
         return existing_scraped
 
     already_scraped_urls = {s.url for s in existing_scraped if not s.error}
-
-    # Sort by tier (lower tier value = higher authority) then snippet length
     tier_order = {"tier_1": 0, "tier_2": 1, "tier_3": 2}
-    candidates = [a for a in discovered if a.url not in already_scraped_urls]
-    candidates.sort(key=lambda a: (tier_order.get(a.tier.value, 2), -len(a.snippet or "")))
-    to_scrape_urls = [a.url for a in candidates[:post_scrape_max]]
 
-    if not to_scrape_urls:
+    # Group unscraped candidates by track
+    candidates_by_track: dict[str, list[DiscoveredArticle]] = {}
+    for article in discovered:
+        if article.url not in already_scraped_urls:
+            key = article.track.value
+            candidates_by_track.setdefault(key, []).append(article)
+
+    if not candidates_by_track:
+        return existing_scraped
+
+    # Distribute budget evenly; any remainder goes to whichever tracks have more articles
+    num_tracks = len(candidates_by_track)
+    base_quota = post_scrape_max // num_tracks
+    remainder = post_scrape_max % num_tracks
+
+    to_scrape_tagged: list[tuple[str, BriefingTrack]] = []
+    for i, (track_val, articles) in enumerate(sorted(candidates_by_track.items())):
+        quota = base_quota + (1 if i < remainder else 0)
+        articles.sort(key=lambda a: (tier_order.get(a.tier.value, 2), -len(a.snippet or "")))
+        track = BriefingTrack(track_val)
+        for article in articles[:quota]:
+            to_scrape_tagged.append((article.url, track))
+
+    if not to_scrape_tagged:
         return existing_scraped
 
     logger.info(
         f"Post-discovery scraping: fetching full content for "
-        f"{len(to_scrape_urls)} top discovered articles"
+        f"{len(to_scrape_tagged)} articles across {num_tracks} tracks"
     )
 
     try:
-        new_scraped = await scrape_urls(to_scrape_urls)
+        new_scraped = await scrape_urls(to_scrape_tagged)
         logger.info(
             f"Post-discovery scraping: {len([s for s in new_scraped if not s.error])} "
             f"pages scraped successfully"
@@ -668,6 +684,8 @@ async def _synthesise_track(
         grounding_report=grounding_report,
         month=gathered.run_context.month,
         subject_template=subject_template,
+        min_output_confidence=grounding_config.get("min_output_confidence", 0.5),
+        exclude_confidence_below=grounding_config.get("exclude_confidence_below", 0.3),
     )
 
     logger.info(
@@ -712,18 +730,21 @@ def _load_vendor_watchlist() -> dict:
         return yaml.safe_load(f) or {}
 
 
-def _get_curated_urls(config: dict, tracks: list[BriefingTrack]) -> list[str]:
-    """Extract curated URLs for the specified tracks from config."""
-    urls: list[str] = []
+def _get_curated_urls(config: dict, tracks: list[BriefingTrack]) -> list[tuple[str, BriefingTrack]]:
+    """Extract curated URLs with their associated track from config.
+
+    Returns list of (url, track) tuples preserving per-source track association
+    so that ScrapedSource objects can be tagged and filtered per track downstream.
+    """
+    seen: dict[str, BriefingTrack] = {}
     curated = config.get("curated_sources", {})
     for track in tracks:
         key = f"track_{track.value}"
         for source in curated.get(key, []):
             url = source.get("url")
-            if url:
-                urls.append(url)
-    # Deduplicate
-    return list(dict.fromkeys(urls))
+            if url and url not in seen:
+                seen[url] = track
+    return list(seen.items())
 
 
 def _safe_list(result, context: str) -> list:

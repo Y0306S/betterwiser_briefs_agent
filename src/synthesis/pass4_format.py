@@ -53,6 +53,8 @@ async def format_and_validate(
     grounding_report: GroundingReport,
     month: str,
     subject_template: str = "",
+    min_output_confidence: float = 0.5,
+    exclude_confidence_below: float = 0.3,
 ) -> ValidatedBriefing:
     """
     Format the synthesised briefing as Outlook-compatible HTML and validate links.
@@ -76,7 +78,11 @@ async def format_and_validate(
             f"Track {track.value}: Pass 4 — rendering from structured draft "
             f"({sum(len(s.items) for s in synthesis.draft.sections)} items)"
         )
-        content_html = _format_from_draft(synthesis.draft)
+        content_html = _format_from_draft(
+            synthesis.draft,
+            min_output_confidence=min_output_confidence,
+            exclude_confidence_below=exclude_confidence_below,
+        )
         source_count = synthesis.draft.total_sources_used
     else:
         # ------------------------------------------------------------------ #
@@ -419,15 +425,25 @@ def _wrap_in_email_template(
 </html>"""
 
 
-def _format_from_draft(draft: SynthesisDraft) -> str:
+def _format_from_draft(
+    draft: SynthesisDraft,
+    min_output_confidence: float = 0.5,
+    exclude_confidence_below: float = 0.3,
+) -> str:
     """
     Deterministically render a SynthesisDraft to HTML.
 
-    Produces clean, structured HTML that requires only inline-style injection by
-    _normalise_content_html — no regex cleanup of freeform Claude output needed.
+    Items are split into three tiers:
+    - confidence >= min_output_confidence: rendered inline with the main briefing
+    - exclude_confidence_below <= confidence < min_output_confidence: collected and
+      rendered in a separate "Items Pending Verification" section at the bottom
+    - confidence < exclude_confidence_below OR (not verified AND confidence == 0.0):
+      excluded entirely
+
     All values are HTML-escaped at the point of insertion.
     """
     parts: list[str] = []
+    pending_parts: list[str] = []  # items segregated for review
 
     # Optional hot vendor callout (Track A)
     if draft.hot_vendor:
@@ -451,60 +467,84 @@ def _format_from_draft(draft: SynthesisDraft) -> str:
                 f'<p><strong>Relevance to BetterWiser:</strong> {rel}</p>'
             )
 
-        # Items as an unordered list
-        parts.append('<ul>')
+        # Items as an unordered list — only include high-confidence items here
+        section_items_html: list[str] = []
         for item in section.items:
-            # Skip items that completely failed fact-checking
+            # Completely failed fact-checking or below exclusion threshold → drop
             if not item.verified and item.confidence == 0.0:
                 continue
+            if item.confidence < exclude_confidence_below:
+                continue
 
-            parts.append('<li>')
+            item_html = _render_item(item)
 
-            # Heading + optional date
-            item_heading = escape(item.heading)
-            if item.date_str:
-                date = escape(item.date_str)
-                parts.append(f'<strong>{item_heading}</strong> <span>({date})</span>')
-            else:
-                parts.append(f'<strong>{item_heading}</strong>')
-
-            # Summary
-            if item.summary:
-                summary = escape(item.summary)
-                parts.append(f'<br>{summary}')
-
-            # Source link
-            if item.source_url:
-                url = item.source_url  # URLs not escaped — they go in href attr
-                name = escape(item.source_name or _domain_from_url(item.source_url))
-                parts.append(
-                    f' <a href="{url}">[{name}]</a>'
-                )
-
-            # Low-confidence annotation
-            if not item.verified or item.confidence < 0.7:
-                parts.append(
+            if item.confidence < min_output_confidence:
+                # Segregate to pending section — include section context
+                pending_parts.append(
+                    f'<li style="border-left-color:#856404;">'
+                    f'<span style="font-size:11px;color:#856404;font-weight:bold;">'
+                    f'[From: {escape(section.heading)}]</span><br>'
+                    + item_html +
                     '<span style="color:#856404;font-size:11px;margin-left:6px;">'
-                    '&#9888; Partially verified</span>'
+                    '&#9888; Pending verification (confidence: '
+                    f'{item.confidence:.0%})</span>'
+                    '</li>'
                 )
+            else:
+                section_items_html.append(f'<li>{item_html}</li>')
 
-            # Track C: opinion takeaway
-            if item.opinion_takeaway:
-                ot = escape(item.opinion_takeaway)
-                parts.append(
-                    f'<br><em><strong>Opinion Takeaway:</strong> {ot}</em>'
-                )
+        if section_items_html:
+            parts.append('<ul>')
+            parts.extend(section_items_html)
+            parts.append('</ul>')
 
-            # Track C: BW relevance
-            if item.betterwiser_relevance:
-                bwr = escape(item.betterwiser_relevance)
-                parts.append(
-                    f'<br><strong>Relevance to BetterWiser:</strong> {bwr}'
-                )
-
-            parts.append('</li>')
-
+    # Append segregated pending items in a clearly demarcated section
+    if pending_parts:
+        parts.append(
+            '<hr>'
+            '<h2>Items Pending Verification</h2>'
+            '<p><em>The following items could not be fully verified against source documents. '
+            'Please review before citing externally.</em></p>'
+        )
+        parts.append('<ul>')
+        parts.extend(pending_parts)
         parts.append('</ul>')
+
+    return '\n'.join(parts)
+
+
+def _render_item(item: DraftBriefingItem) -> str:
+    """Render a single DraftBriefingItem to an HTML fragment (without <li> wrapper)."""
+    parts: list[str] = []
+
+    # Heading + optional date
+    item_heading = escape(item.heading)
+    if item.date_str:
+        date = escape(item.date_str)
+        parts.append(f'<strong>{item_heading}</strong> <span>({date})</span>')
+    else:
+        parts.append(f'<strong>{item_heading}</strong>')
+
+    # Summary
+    if item.summary:
+        summary = escape(item.summary)
+        parts.append(f'<br>{summary}')
+
+    # Source link
+    if item.source_url:
+        url = item.source_url  # URLs not escaped — they go in href attr
+        name = escape(item.source_name or _domain_from_url(item.source_url))
+        parts.append(f' <a href="{url}">[{name}]</a>')
+
+    # Track C: opinion takeaway
+    if item.opinion_takeaway:
+        ot = escape(item.opinion_takeaway)
+        parts.append(f'<br><em><strong>Opinion Takeaway:</strong> {ot}</em>')
+
+    # Track C: BW relevance
+    if item.betterwiser_relevance:
+        bwr = escape(item.betterwiser_relevance)
+        parts.append(f'<br><strong>Relevance to BetterWiser:</strong> {bwr}')
 
     return '\n'.join(parts)
 

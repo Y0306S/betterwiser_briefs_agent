@@ -74,6 +74,7 @@ class ScrapedSource(BaseModel):
     scraped_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
     word_count: int = 0
     error: Optional[str] = None          # populated if scraper partially failed
+    track: Optional[BriefingTrack] = None  # which briefing track this source belongs to
 
     @field_validator("url")
     @classmethod

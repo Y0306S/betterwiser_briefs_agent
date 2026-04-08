@@ -35,6 +35,7 @@ from src.schemas import (
     ThemeGroup,
 )
 from src.utils.retry import async_retry
+from src.utils.token_budget import trim_documents_to_budget
 
 logger = logging.getLogger(__name__)
 
@@ -161,6 +162,7 @@ async def draft_briefing(
     thinking_budget = model_config.get("extended_thinking_budget", 10000)
     max_context_sources = model_config.get("max_context_sources", 30)
     source_max_chars = model_config.get("source_content_max_chars", 4000)
+    temperature = model_config.get("temperature", 0.4)
 
     if max_tokens <= thinking_budget:
         max_tokens = thinking_budget + 2000
@@ -171,6 +173,16 @@ async def draft_briefing(
 
     # Build document blocks with citations enabled
     source_docs = _build_source_documents(gathered, clusters, max_context_sources, source_max_chars)
+    # Trim to fit context window
+    user_text = (
+        f"Generate the Track {track.value} briefing. "
+        f"Historical context length: {len(gathered.historical_context or '')} chars."
+    )
+    source_docs = trim_documents_to_budget(
+        source_docs, system_prompt, user_text,
+        reserved_output=max_tokens + 2000,
+        label=f"Track {track.value} Pass 2",
+    )
 
     # Date context
     month_human = _month_human(gathered.run_context.month)
@@ -204,9 +216,13 @@ async def draft_briefing(
             "</advisory_context>"
         )
 
-    # Tool use instruction — appended so the model knows to call submit_briefing
+    # Re-apply injection guardrail AFTER all potentially-untrusted context has been appended.
+    # This ensures any injected instructions within betterwiser_context are sandwiched
+    # between the opening guardrail and this closing reminder.
     system_prompt += (
-        "\n\nOUTPUT INSTRUCTION: You MUST call the `submit_briefing` tool exactly once "
+        "\n\n"
+        + _INJECTION_GUARDRAIL.strip()
+        + "\n\nOUTPUT INSTRUCTION: You MUST call the `submit_briefing` tool exactly once "
         "with the complete briefing. Do not write prose — use the tool."
     )
 
@@ -242,25 +258,35 @@ async def draft_briefing(
             system=system_prompt,
             messages=[{"role": "user", "content": user_content_parts}],
         )
-    except anthropic.BadRequestError as e:
-        logger.warning(f"Track {track.value}: extended thinking rejected ({e}), retrying without thinking")
+    except (anthropic.BadRequestError, anthropic.APITimeoutError) as e:
+        # BadRequestError: extended thinking rejected by API (e.g. unsupported params)
+        # APITimeoutError: extended thinking timed out — retry without thinking budget
+        logger.warning(f"Track {track.value}: extended thinking failed ({type(e).__name__}: {e}), retrying without thinking")
         try:
             response = await client.messages.create(
                 model=model_id,
                 max_tokens=max_tokens,
+                temperature=temperature,
                 tools=[SUBMIT_BRIEFING_TOOL],
                 tool_choice={"type": "any"},
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_content_parts}],
             )
+        except anthropic.RateLimitError as rle:
+            # Surface rate limit so the outer @async_retry decorator can back off
+            raise rle
         except Exception as e2:
             logger.warning(f"Track {track.value}: tool use failed ({e2}), falling back to text")
             response = await client.messages.create(
                 model=model_id,
                 max_tokens=max_tokens,
+                temperature=temperature,
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_content_parts}],
             )
+    except anthropic.RateLimitError:
+        # Let the outer @async_retry handle rate limit with exponential backoff
+        raise
 
     # --- Parse response ---
     thinking_text: Optional[str] = None

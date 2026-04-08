@@ -34,6 +34,7 @@ from src.schemas import (
     SynthesisResult,
 )
 from src.utils.retry import async_retry
+from src.utils.token_budget import trim_documents_to_budget
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,44 @@ _CLAIM_CAP = 100
 
 # Confidence multiplier when a claim is only partially supported
 _PARTIAL_CONFIDENCE = 0.7
+
+# Tool schema for structured verification output — eliminates regex parsing
+_VERIFY_CLAIMS_TOOL = {
+    "name": "submit_verification",
+    "description": (
+        "Submit verification results for all claims. "
+        "Call this tool ONCE with results for every claim in the batch."
+    ),
+    "input_schema": {
+        "type": "object",
+        "required": ["results"],
+        "properties": {
+            "results": {
+                "type": "array",
+                "description": "One entry per claim, in the same order as the input claims.",
+                "items": {
+                    "type": "object",
+                    "required": ["claim_number", "status"],
+                    "properties": {
+                        "claim_number": {
+                            "type": "integer",
+                            "description": "1-based index matching the input claim list.",
+                        },
+                        "status": {
+                            "type": "string",
+                            "enum": ["VERIFIED", "PARTIAL", "UNVERIFIED"],
+                            "description": "Verification outcome.",
+                        },
+                        "reason": {
+                            "type": "string",
+                            "description": "One sentence explaining the verdict.",
+                        },
+                    },
+                },
+            },
+        },
+    },
+}
 
 
 @async_retry(max_attempts=3, base_delay=3.0)
@@ -73,6 +112,11 @@ async def fact_check(
     source_max_chars = model_config.get("source_content_max_chars", 4000)
 
     source_docs = _build_verification_docs(gathered, source_max_chars)
+    source_docs = trim_documents_to_budget(
+        source_docs, "", "",
+        reserved_output=4096,
+        label=f"Track {synthesis.track.value} Pass 3",
+    )
 
     if not source_docs:
         logger.warning(
@@ -126,7 +170,17 @@ async def _factcheck_draft(
             break
 
     if not claim_index:
-        logger.info(f"Track {synthesis.track.value}: Pass 3 — no verifiable claims found in draft")
+        total_draft_items = sum(len(s.items) for s in draft.sections)
+        if total_draft_items > 0:
+            logger.warning(
+                f"Track {synthesis.track.value}: Pass 3 — claim extractor yielded 0 claims "
+                f"from {total_draft_items} draft items. Coverage defaulting to 0.0 (not vacuously 1.0)."
+            )
+            # Propagate the 0 coverage so grounding / delivery can flag it
+            if 3 not in synthesis.pass_completed:
+                synthesis.pass_completed.append(3)
+            return synthesis
+        logger.info(f"Track {synthesis.track.value}: Pass 3 — no items and no claims; skipping")
         return synthesis
 
     logger.info(
@@ -183,7 +237,8 @@ async def _factcheck_draft(
                 item.correction_note = _collect_reasons(statuses, "UNVERIFIED")
 
     total_checked = len(item_results)
-    coverage_rate = (verified_total + partial_total) / total_checked if total_checked else 1.0
+    # Use 0.0 when nothing was checked but items exist — avoids vacuous 100% coverage
+    coverage_rate = (verified_total + partial_total) / total_checked if total_checked else 0.0
 
     logger.info(
         f"Track {synthesis.track.value}: Pass 3 complete — "
@@ -231,7 +286,8 @@ async def _attempt_correction(
         response = await client.messages.create(
             model=model_id,
             max_tokens=512,
-            system="You are a fact-checker. Search documents carefully and be precise.",
+            temperature=0.0,
+            system="You are a fact-checker. Search documents carefully and be precise. You must ONLY use information from the provided source documents. Do not use any external knowledge.",
             messages=[{
                 "role": "user",
                 "content": source_docs + [{"type": "text", "text": prompt}],
@@ -309,44 +365,110 @@ async def _verify_claim_batch(
     """
     Verify a batch of claim strings against source documents.
 
+    Primary path: tool use with submit_verification schema (100% machine-parseable).
+    Fallback path: regex parsing of freeform text (backward compatibility).
+
     Returns a list of (status, reason) tuples aligned with the input claims.
     Status is one of: VERIFIED | PARTIAL | UNVERIFIED.
     """
     claims_text = "\n".join(f"[{i+1}] {c}" for i, c in enumerate(claims))
 
+    system_prompt = (
+        "You are a precise fact-checker. Your only job is to verify claims against "
+        "provided source documents. Do not use external knowledge. "
+        "Do not use any information not present in the provided documents.\n\n"
+        "For each claim, determine if it is VERIFIED (clearly supported), "
+        "PARTIAL (partially supported or unclear), or UNVERIFIED (not found or contradicted). "
+        "Call the submit_verification tool with results for ALL claims."
+    )
+
+    user_text = (
+        f"Verify each claim against the source documents above.\n\n"
+        f"Claims:\n{claims_text}"
+    )
+
+    # --- Primary path: tool use ---
     try:
         response = await client.messages.create(
             model=model_id,
             max_tokens=2048,
-            system=(
-                "You are a precise fact-checker. Your only job is to verify claims against "
-                "provided source documents. Do not use external knowledge.\n\n"
-                "For each claim respond EXACTLY as:\n"
-                "[N] STATUS: one-sentence reason\n"
-                "STATUS must be VERIFIED, PARTIAL, or UNVERIFIED."
-            ),
+            temperature=0.0,
+            tools=[_VERIFY_CLAIMS_TOOL],
+            tool_choice={"type": "any"},
+            system=system_prompt,
             messages=[{
                 "role": "user",
-                "content": source_docs + [{
-                    "type": "text",
-                    "text": (
-                        f"Verify each claim against the source documents above.\n\n"
-                        f"Claims:\n{claims_text}\n\n"
-                        f"Respond with one line per claim: [N] STATUS: brief reason"
-                    ),
-                }],
+                "content": source_docs + [{"type": "text", "text": user_text}],
             }],
         )
 
+        # Extract tool use block
+        for block in response.content:
+            if hasattr(block, "type") and block.type == "tool_use" and block.name == "submit_verification":
+                return _parse_tool_verification(claims, block.input)
+
+        # Tool block not found — fall through to text parsing
         response_text = _extract_text(response.content)
-        return _parse_batch_response(claims, response_text)
+        if response_text.strip():
+            logger.debug("Fact-check tool use returned no tool block; falling back to regex parsing")
+            return _parse_batch_response(claims, response_text)
 
     except Exception as e:
         logger.warning(
-            f"Claim batch verification failed: {e}. "
-            f"Marking {len(claims)} claims UNVERIFIED (conservative)."
+            f"Claim batch verification (tool use) failed: {e}. "
+            f"Attempting regex fallback."
         )
-        return [("UNVERIFIED", str(e)[:80]) for _ in claims]
+        # --- Fallback: text-only call with regex parsing ---
+        try:
+            response = await client.messages.create(
+                model=model_id,
+                max_tokens=2048,
+                temperature=0.0,
+                system=(
+                    "You are a precise fact-checker. Your only job is to verify claims against "
+                    "provided source documents. Do not use external knowledge.\n\n"
+                    "For each claim respond EXACTLY as:\n"
+                    "[N] STATUS: one-sentence reason\n"
+                    "STATUS must be VERIFIED, PARTIAL, or UNVERIFIED."
+                ),
+                messages=[{
+                    "role": "user",
+                    "content": source_docs + [{"type": "text", "text": user_text}],
+                }],
+            )
+            response_text = _extract_text(response.content)
+            return _parse_batch_response(claims, response_text)
+        except Exception as e2:
+            logger.warning(
+                f"Claim batch verification fallback also failed: {e2}. "
+                f"Marking {len(claims)} claims UNVERIFIED (conservative)."
+            )
+
+    return [("UNVERIFIED", "verification failed") for _ in claims]
+
+
+def _parse_tool_verification(
+    claims: list[str],
+    tool_input: dict,
+) -> list[tuple[str, str]]:
+    """
+    Parse the submit_verification tool input into aligned (status, reason) tuples.
+    """
+    valid_statuses = {"VERIFIED", "PARTIAL", "UNVERIFIED"}
+    # Build a dict of claim_number → (status, reason)
+    result_map: dict[int, tuple[str, str]] = {}
+    for entry in tool_input.get("results", []):
+        n = entry.get("claim_number")
+        status = str(entry.get("status", "UNVERIFIED")).upper()
+        reason = str(entry.get("reason", ""))[:200]
+        if isinstance(n, int) and status in valid_statuses:
+            result_map[n] = (status, reason)
+
+    # Return aligned list; default UNVERIFIED for any missing entries
+    return [
+        result_map.get(i + 1, ("UNVERIFIED", "not returned by verifier"))
+        for i in range(len(claims))
+    ]
 
 
 def _parse_batch_response(
@@ -354,14 +476,14 @@ def _parse_batch_response(
     response_text: str,
 ) -> list[tuple[str, str]]:
     """
-    Parse Claude's batch verification response.
+    Parse Claude's freeform batch verification response (fallback path).
     Returns aligned list of (status, reason) tuples.
     """
     results: list[tuple[str, str]] = []
 
     for i in range(len(claims)):
         n = i + 1
-        # Match [N] STATUS: reason  (handles both bracket styles)
+        # Match [N] STATUS: reason
         pattern = rf"\[{n}\]\s*(VERIFIED|UNVERIFIED|PARTIAL)\s*:?\s*(.+?)(?=\[{n+1}\]|$)"
         m = re.search(pattern, response_text, re.IGNORECASE | re.DOTALL)
         if m:
@@ -369,7 +491,6 @@ def _parse_batch_response(
             reason = m.group(2).strip()[:200]
             results.append((status, reason))
         else:
-            # Fallback: look for just [N] STATUS anywhere
             fallback = re.search(rf"\[{n}\]\s*(VERIFIED|UNVERIFIED|PARTIAL)", response_text, re.I)
             if fallback:
                 results.append((fallback.group(1).upper(), ""))
@@ -383,10 +504,11 @@ def _extract_item_claims(item: DraftBriefingItem) -> list[str]:
     """
     Extract verifiable claims from a DraftBriefingItem.
 
-    Returns 0–3 specific claims per item:
+    Returns 0–5 specific claims per item:
     - heading (always verifiable)
     - date_str + heading compound if date present
-    - any sentence in summary containing numbers/percentages/entity verbs
+    - up to 2 fact-dense sentences from summary
+    - compound claims split on conjunctions within a summary sentence
     """
     claims: list[str] = []
 
@@ -398,23 +520,41 @@ def _extract_item_claims(item: DraftBriefingItem) -> list[str]:
     if item.date_str and item.heading:
         claims.append(f"{item.date_str}: {item.heading}")
 
-    # Extract fact-dense sentences from summary
+    # Extract fact-dense sentences from summary (up to 2 per item)
     if item.summary:
-        sentences = re.split(r"(?<=[.!?])\s+", item.summary)
         verifiable_patterns = [
             re.compile(r"\d{4}"),
             re.compile(r"\$[\d,]+"),
             re.compile(r"\d+%"),
-            re.compile(r"\b(?:announced|launched|raised|acquired|partnered|released|signed|expanded|merged|acquired)\b", re.I),
+            re.compile(r"\b(?:announced|launched|raised|acquired|partnered|released|signed|expanded|merged)\b", re.I),
             re.compile(r"\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\b", re.I),
         ]
+        sentences = re.split(r"(?<=[.!?])\s+", item.summary)
+        summary_claims_added = 0
         for sent in sentences:
             sent = sent.strip()
-            if len(sent) >= 20 and any(p.search(sent) for p in verifiable_patterns):
+            if len(sent) < 20:
+                continue
+            if not any(p.search(sent) for p in verifiable_patterns):
+                continue
+            # Check if sentence contains a compound assertion — split on conjunctions
+            # e.g. "X acquired Y for $100M and will integrate by Q3" → two claims
+            compound_parts = re.split(r"\s+(?:and|while|which|who)\s+", sent, flags=re.I)
+            if len(compound_parts) > 1:
+                for part in compound_parts:
+                    part = part.strip()
+                    if len(part) >= 20 and any(p.search(part) for p in verifiable_patterns):
+                        claims.append(part[:300])
+                        summary_claims_added += 1
+                        if summary_claims_added >= 2:
+                            break
+            else:
                 claims.append(sent[:300])
-                break  # max 1 summary claim per item to stay under cap
+                summary_claims_added += 1
+            if summary_claims_added >= 2:
+                break
 
-    return claims[:3]
+    return claims[:5]
 
 
 def _worst_status(statuses: list[tuple[str, str]]) -> str:

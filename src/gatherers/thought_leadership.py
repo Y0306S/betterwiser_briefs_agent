@@ -30,6 +30,7 @@ import yaml
 from src.gatherers.discovery import WEB_SEARCH_TOOL, _parameterise_query
 from src.schemas import BriefingTrack, DiscoveredArticle, EmailSource, SourceTier
 from src.utils.authority import classify_url
+from src.utils.json_extractor import extract_json_array
 from src.utils.retry import async_retry
 
 logger = logging.getLogger(__name__)
@@ -191,6 +192,7 @@ async def _wave1_newsletter_extraction(
         response = await client.messages.create(
             model=model_id,
             max_tokens=4096,
+            temperature=0.5,
             system=(
                 "You are a research analyst extracting structured intelligence from newsletter emails. "
                 "Identify thought leadership articles and named individuals who are commenting on legal AI."
@@ -288,6 +290,7 @@ async def _wave2_single_search(
     response = await client.messages.create(
         model=model_id,
         max_tokens=1024,
+        temperature=0.5,
         tools=[WEB_SEARCH_TOOL],
         system=(
             f"You are researching thought leadership by {name} in legal AI. "
@@ -334,6 +337,7 @@ async def _wave3_firm_pages(
                     response = await client.messages.create(
                         model=model_id,
                         max_tokens=2048,
+                        temperature=0.5,
                         tools=[WEB_FETCH_TOOL],
                         system=(
                             f"You are extracting recent thought leadership content from {firm_name}'s "
@@ -450,6 +454,7 @@ async def _wave5_semantic_expansion(
             response = await client.messages.create(
                 model=model_id,
                 max_tokens=1024,
+                temperature=0.5,
                 tools=[WEB_SEARCH_TOOL],
                 system=(
                     "You are finding conceptually related thought leadership on legal AI. "
@@ -508,6 +513,7 @@ async def _wave6_conference_mining(
             response = await client.messages.create(
                 model=model_id,
                 max_tokens=2048,
+                temperature=0.5,
                 tools=[WEB_SEARCH_TOOL],
                 system=(
                     f"You are mining {conf_name} for speaker names and their recent publications "
@@ -588,6 +594,7 @@ async def _wave7_contrarian_search(
         theme_response = await client.messages.create(
             model=model_id,
             max_tokens=512,
+            temperature=0.3,
             system=(
                 "You are identifying the 3 most dominant consensus themes "
                 "in a set of legal AI thought leadership articles."
@@ -604,23 +611,9 @@ async def _wave7_contrarian_search(
                 ),
             }],
         )
-        themes = _parse_article_array(_extract_text(theme_response))
-        # Themes come back as strings not dicts — handle that
-        import json as _json
         raw_text = _extract_text(theme_response)
-        start = raw_text.find("[")
-        end = raw_text.rfind("]")
-        if start != -1 and end != -1:
-            try:
-                parsed_themes = _json.loads(raw_text[start:end+1])
-                if isinstance(parsed_themes, list):
-                    themes = [str(t) for t in parsed_themes if t][:3]
-                else:
-                    themes = []
-            except (ValueError, KeyError):
-                themes = []
-        else:
-            themes = []
+        parsed_themes = extract_json_array(raw_text)
+        themes = [str(t) for t in parsed_themes if t][:3]
     except Exception as e:
         logger.debug(f"Wave 7 theme extraction failed: {e}")
         themes = []
@@ -646,6 +639,7 @@ async def _wave7_contrarian_search(
             response = await client.messages.create(
                 model=model_id,
                 max_tokens=1024,
+                temperature=0.6,
                 tools=[WEB_SEARCH_TOOL],
                 system=(
                     "You are finding critical, sceptical, and cautionary perspectives "
@@ -714,19 +708,8 @@ def _parse_json_response(text: str) -> Optional[dict]:
 
 def _parse_article_array(text: str) -> list[dict]:
     """Try to extract a JSON array of article objects from text."""
-    import json
-    # Use find/rfind: first '[' to last ']' — handles arrays with objects
-    # that themselves contain brackets, while avoiding runaway greedy matching.
-    start = text.find("[")
-    end = text.rfind("]")
-    if start != -1 and end != -1 and end > start:
-        try:
-            data = json.loads(text[start : end + 1])
-            if isinstance(data, list):
-                return [item for item in data if isinstance(item, dict)]
-        except (ValueError, KeyError):
-            pass
-    return []
+    items = extract_json_array(text)
+    return [item for item in items if isinstance(item, dict)]
 
 
 def _summarise_email_sources(

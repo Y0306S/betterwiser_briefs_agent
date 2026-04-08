@@ -179,6 +179,7 @@ async def _run_web_searches(
         response = await client.messages.create(
             model=model_id,
             max_tokens=4096,
+            temperature=0.3,
             tools=[WEB_SEARCH_TOOL],
             messages=[{"role": "user", "content": prompt}],
         )
@@ -267,6 +268,7 @@ async def _synthesise_update(
         response = await client.messages.create(
             model=model_id,
             max_tokens=8192,
+            temperature=0.3,
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
         )

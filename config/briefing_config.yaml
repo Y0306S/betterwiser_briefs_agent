@@ -11,10 +11,20 @@ model:
   max_tokens: 16000
   max_context_sources: 30        # max scraped sources sent to Pass 2 draft
   source_content_max_chars: 4000 # truncate each source to this length
+  temperature: 0.4               # structured but allows editorial voice
 
 research_model:
   id: "claude-sonnet-4-6"        # All research + factcheck calls — JSON extraction, web search, verification
   max_tokens: 4096               # Research calls never need long outputs
+  temperature: 0.5               # balanced for research breadth
+
+# Per-purpose temperature overrides (used by specific pipeline stages)
+temperatures:
+  factcheck: 0.0                 # deterministic verification — zero creativity
+  correction: 0.0                # deterministic correction lookups
+  discovery: 0.6                 # moderate diversity for search breadth
+  thought_leadership: 0.5        # balanced research
+  profile_update: 0.3            # precise context editing
 
 tracks:
   - id: "A"
@@ -178,6 +188,8 @@ grounding:
   pass_rate_threshold: 0.95
   citation_coverage_threshold: 0.90
   fuzzy_match_threshold: 80       # thefuzz score 0-100
+  min_output_confidence: 0.5      # items below this are segregated to "Pending Verification"
+  exclude_confidence_below: 0.3   # items below this are excluded entirely from output
 
 # Auto-expanding vendor watchlist threshold
 vendor_watchlist:

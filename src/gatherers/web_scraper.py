@@ -20,7 +20,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from src.schemas import ScrapedSource, SourceTier
+from src.schemas import BriefingTrack, ScrapedSource, SourceTier
 from src.utils.authority import classify_url
 from src.utils.retry import async_retry
 
@@ -129,36 +129,52 @@ async def scrape_url(url: str) -> ScrapedSource:
     )
 
 
-async def scrape_urls(urls: list[str], concurrency: int = 5) -> list[ScrapedSource]:
+async def scrape_urls(
+    urls: list[str] | list[tuple[str, BriefingTrack]],
+    concurrency: int = 5,
+) -> list[ScrapedSource]:
     """
     Scrape multiple URLs with bounded concurrency.
 
     Args:
-        urls: List of URLs to scrape.
+        urls: Either a plain list of URL strings, or a list of (url, BriefingTrack)
+              tuples. When tuples are provided, the resulting ScrapedSource objects
+              are tagged with the associated track for downstream filtering.
         concurrency: Max simultaneous scraping tasks.
 
     Returns:
         List of ScrapedSource objects (one per input URL).
     """
+    # Normalise to list of (url, track_or_None) tuples
+    tagged: list[tuple[str, BriefingTrack | None]] = []
+    for item in urls:
+        if isinstance(item, tuple):
+            tagged.append(item)
+        else:
+            tagged.append((item, None))
+
     semaphore = asyncio.Semaphore(concurrency)
 
     async def bounded_scrape(url: str) -> ScrapedSource:
         async with semaphore:
             return await scrape_url(url)
 
-    tasks = [bounded_scrape(url) for url in urls]
+    tasks = [bounded_scrape(url) for url, _ in tagged]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     output: list[ScrapedSource] = []
-    for url, result in zip(urls, results):
+    for (url, track), result in zip(tagged, results):
         if isinstance(result, Exception):
             logger.error(f"scrape_url raised unexpected exception for {url}: {result}")
             output.append(ScrapedSource(
                 url=url, title="[Error]", content="", tier=SourceTier.TIER_3,
-                scraper_used="none", word_count=0, error=str(result),
+                scraper_used="none", word_count=0, error=str(result), track=track,
             ))
         else:
-            output.append(result)  # type: ignore[arg-type]
+            source: ScrapedSource = result  # type: ignore[assignment]
+            if track is not None:
+                source.track = track
+            output.append(source)
 
     successful = sum(1 for s in output if not s.error)
     logger.info(f"Scraped {len(urls)} URLs: {successful} successful, {len(urls)-successful} failed")

@@ -93,10 +93,12 @@ def _collect_candidates(
     """
     candidates: list[dict] = []
 
-    # From scraped sources (all are implicitly relevant to the tracks that scraped them)
+    # From scraped sources — include if track matches or source is untagged (backward compat)
     for source in gathered.scraped_sources:
         if source.error or not source.content:
             continue
+        if source.track is not None and source.track != track:
+            continue  # skip sources tagged for a different track
         candidates.append({
             "url": source.url,
             "title": source.title or _url_to_title(source.url),
