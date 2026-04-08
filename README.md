@@ -408,6 +408,8 @@ betterwiser_briefs_agent/
 │   │   └── pass_cross_track.py    ← Post-synthesis cross-track entity annotation
 │   ├── delivery/                  ← Phase 5: archive + email
 │   └── utils/                     ← Shared helpers
+│       ├── token_budget.py        ← Context window budget estimation + auto-trim
+│       ├── json_extractor.py      ← Robust JSON array extraction from LLM responses
 │       ├── trend_db.py            ← Persistent entity mention tracker (JSON)
 │       └── wayback.py             ← CDX API verification for dead-link fallbacks
 │
@@ -441,6 +443,12 @@ Layer 2: CITATIONS              Every claim must be traceable to a
                                 UNVERIFIED claims trigger a correction
                                 loop re-lookup before being flagged.
                                 PARTIAL claims reduce confidence (0.7x).
+                                Items below min_output_confidence (0.5)
+                                are moved to a "Pending Verification"
+                                section. Items below exclude_confidence_
+                                below (0.3) are removed from output
+                                entirely. Thresholds configurable in
+                                briefing_config.yaml.
 
 Layer 3: GROUNDING              95%+ of claims must fuzzy-match source
 ──────────────────              text (configurable in briefing_config.yaml)

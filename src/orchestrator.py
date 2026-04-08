@@ -11,7 +11,7 @@ Usage:
 
 Phases:
     1  Trigger    — Build RunContext, load config, set up logging
-    2  Gather     — 5 parallel sub-pipelines (inbox, web, discovery, TL, history)
+    2  Gather     — 6 parallel sub-pipelines (inbox, web, discovery, TL, history, RSS)
     3  Synthesise — 6-pass pipeline per track (cluster→triage→draft→factcheck→ground→format)
     4  Validate   — Link check + grounding threshold check
     5  Deliver    — Archive + optional email send via MS Graph

@@ -247,6 +247,8 @@ betterwiser_briefs_agent/
 │   │   └── pass_cross_track.py       ← Post-synthesis cross-track annotation
 │   ├── delivery/                     ← Phase 5: email + archive
 │   └── utils/                        ← Shared utilities
+│       ├── token_budget.py           ← Context window budget estimation + auto-trim
+│       ├── json_extractor.py         ← Robust JSON array extraction from LLM responses
 │       ├── trend_db.py               ← Entity mention counter across months
 │       └── wayback.py                ← CDX API verification for dead links
 ├── runs/                             ← Output directory (auto-created)
