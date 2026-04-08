@@ -44,6 +44,9 @@ from pathlib import Path
 # Ensure project root is on sys.path so src.* imports work
 sys.path.insert(0, str(Path(__file__).parent))
 
+from dotenv import load_dotenv
+load_dotenv()  # Load .env file
+
 import anthropic
 
 from src.schemas import (
