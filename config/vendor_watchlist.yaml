@@ -26,9 +26,6 @@ vendors:
     - name: "Clio"
       url: "https://clio.com"
       blog_url: "https://clio.com/blog"
-    - name: "Jigsaw"
-      url: "https://jigsaw.xyz"
-      blog_url: "https://jigsaw.xyz/blog"
     - name: "Anthropic (Claude legal)"
       url: "https://anthropic.com"
       blog_url: "https://anthropic.com/news"
@@ -106,7 +103,7 @@ consulting_firms:
     sg_insights_url: "https://www.ey.com/en_sg/insights"
 
   - name: "Deloitte"
-    insights_url: "https://www2.deloitte.com/global/en/pages/technology/topics/artificial-intelligence.html"
+    insights_url: "https://www.deloitte.com/us/en/insights.html"
 
   - name: "KPMG"
     insights_url: "https://kpmg.com/xx/en/home/insights/2023/04/artificial-intelligence.html"

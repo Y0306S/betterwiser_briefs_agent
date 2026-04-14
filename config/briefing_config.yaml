@@ -115,7 +115,7 @@ curated_sources:
     - url: "https://anthropic.com/news"
       tier: "primary"
       vendor: "Anthropic"
-    - url: "https://sal.org.sg/resources/legal-updates"
+    - url: "https://sal.org.sg/newsroom/"
       tier: "primary"
       vendor: "SAL"
     - url: "https://www.lawgazette.com.sg"
@@ -235,22 +235,16 @@ rss_feeds:
     track: "A"
     source_name: "TechCrunch LegalTech"
     tier: "tier_2"
-  - url: "https://www.pdpc.gov.sg/rss/news"
-    track: "B"
-    source_name: "PDPC Singapore"
-    tier: "tier_1"
+  # PDPC RSS path returns 404 — no public RSS feed found; covered via curated scrape
+  # - url: "https://www.pdpc.gov.sg/rss/news"
   - url: "https://www.mas.gov.sg/rss/news"
     track: "B"
     source_name: "MAS Singapore"
     tier: "tier_1"
-  - url: "https://www.minlaw.gov.sg/rss/news"
-    track: "B"
-    source_name: "MinLaw Singapore"
-    tier: "tier_1"
-  - url: "https://iapp.org/feed/"
-    track: "B"
-    source_name: "IAPP Privacy"
-    tier: "tier_2"
+  # MinLaw blocks automated fetchers (403); curated scrape URL used instead
+  # - url: "https://www.minlaw.gov.sg/rss/news"
+  # IAPP feed path returns 404 — no public RSS feed found
+  # - url: "https://iapp.org/feed/"
 
 # Email subject templates
 email_subjects:
